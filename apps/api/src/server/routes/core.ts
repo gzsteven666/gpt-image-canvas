@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { GENERATION_COUNTS, IMAGE_QUALITIES, OUTPUT_FORMATS, SIZE_PRESETS, STYLE_PRESETS, type AppConfig } from "../../domain/contracts.js";
+import { GENERATION_COUNTS, IMAGE_MODELS, IMAGE_QUALITIES, OUTPUT_FORMATS, SIZE_PRESETS, STYLE_PRESETS, type AppConfig } from "../../domain/contracts.js";
 import { getConfiguredImageModel } from "../../infrastructure/providers/image-provider.js";
 
 export function registerCoreRoutes(app: Hono): void {
@@ -13,7 +13,7 @@ export function registerCoreRoutes(app: Hono): void {
     const configuredModel = getConfiguredImageModel();
     const config: AppConfig = {
       model: configuredModel,
-      models: [configuredModel],
+      models: Array.from(new Set([configuredModel, ...IMAGE_MODELS])),
       sizePresets: SIZE_PRESETS,
       stylePresets: STYLE_PRESETS,
       qualities: IMAGE_QUALITIES,

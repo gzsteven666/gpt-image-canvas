@@ -155,6 +155,38 @@
   will-change: transform;
 }
 
+.canvas-open-selected-image-button {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 35;
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(6, 182, 212, 0.38);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.24);
+  color: #0f172a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 12px;
+  pointer-events: auto;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  white-space: nowrap;
+}
+
+.canvas-open-selected-image-button:hover,
+.canvas-open-selected-image-button:focus-visible {
+  border-color: rgba(8, 145, 178, 0.65);
+  background: #ecfeff;
+  box-shadow: 0 16px 42px rgba(8, 145, 178, 0.24);
+  outline: none;
+}
+
 .ai-panel-backdrop,
 .mobile-ai-trigger,
 .ai-panel-close {

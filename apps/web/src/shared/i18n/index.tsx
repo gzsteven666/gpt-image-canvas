@@ -95,13 +95,17 @@ const qualityLabels: Record<Locale, Record<ImageQuality, string>> = {
     auto: "自动",
     low: "快速草稿",
     medium: "标准",
-    high: "高质量"
+    high: "高质量",
+    xhigh: "超高质量",
+    max: "最高质量"
   },
   en: {
     auto: "Auto",
     low: "Fast draft",
     medium: "Standard",
-    high: "High quality"
+    high: "High quality",
+    xhigh: "Extra high quality",
+    max: "Maximum quality"
   }
 };
 

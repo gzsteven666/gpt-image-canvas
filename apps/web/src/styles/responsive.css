@@ -185,6 +185,19 @@
     grid-template-columns: 1fr;
   }
 
+  .aspect-resolution-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .resolved-size-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .resolved-size-summary strong {
+    text-align: left;
+  }
+
   .reference-preview-card {
     grid-template-columns: 1.35rem 3.1rem minmax(0, 1fr);
   }

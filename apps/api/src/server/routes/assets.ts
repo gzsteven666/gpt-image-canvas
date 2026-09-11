@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { parsePreviewWidth, readStoredAssetPreview } from "../../domain/assets/preview.js";
 import { readStoredAsset, readStoredAssetMetadata, saveReferenceImageInput } from "../../domain/generation/image-generation.js";
+import { deleteUnreferencedAsset, purgeAssetsOutsideGallery } from "../../domain/project/project-store.js";
 import { downloadFileName, errorResponse } from "../http/errors.js";
 import { readJson } from "../http/json.js";
 
@@ -52,6 +53,37 @@ export function registerAssetRoutes(app: Hono): void {
     return c.json(metadata);
   });
 
+  app.delete("/api/assets/non-gallery", (c) => {
+    const result = purgeAssetsOutsideGallery();
+    return c.json({
+      ok: true,
+      deletedAssetIds: result.deletedAssetIds,
+      deletedFileCount: result.deletedFileCount
+    });
+  });
+
+  app.delete("/api/assets/:id/orphan", async (c) => {
+    const payload = await readJson(c.req.raw);
+    if (!payload.ok) {
+      return c.json(payload.error, 400);
+    }
+
+    const canvasAssetIds = parseCanvasAssetIds(payload.value);
+    if (!canvasAssetIds.ok) {
+      return c.json(errorResponse("invalid_request_body", "canvasAssetIds must be a string array."), 400);
+    }
+
+    const result = deleteUnreferencedAsset(c.req.param("id"), {
+      canvasAssetIds: canvasAssetIds.value
+    });
+
+    return c.json({
+      ok: true,
+      deleted: result.deleted,
+      reason: result.reason
+    });
+  });
+
   app.get("/api/assets/:id/download", async (c) => {
     const asset = await readStoredAsset(c.req.param("id"));
     if (!asset) {
@@ -100,4 +132,34 @@ function isAssetUploadPayload(input: unknown): input is { dataUrl: string; fileN
 
 function errorToMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Asset upload failed.";
+}
+
+function parseCanvasAssetIds(input: unknown):
+  | {
+      ok: true;
+      value: string[];
+    }
+  | {
+      ok: false;
+    } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false };
+  }
+
+  const canvasAssetIds = (input as Record<string, unknown>).canvasAssetIds;
+  if (!Array.isArray(canvasAssetIds)) {
+    return { ok: false };
+  }
+
+  const assetIds = canvasAssetIds
+    .map((assetId) => (typeof assetId === "string" ? assetId.trim() : ""))
+    .filter(Boolean);
+  if (assetIds.length !== canvasAssetIds.length) {
+    return { ok: false };
+  }
+
+  return {
+    ok: true,
+    value: [...new Set(assetIds)]
+  };
 }

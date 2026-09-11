@@ -280,6 +280,7 @@ ensureColumn("agent_skills", "trigger_keywords_json", "trigger_keywords_json TEX
 ensureColumn("agent_skills", "files_json", "files_json TEXT NOT NULL DEFAULT '{}'");
 
 migrateStorageConfigRows();
+ensureColumn("generation_records", "model", "model TEXT");
 backfillGenerationReferenceAssets();
 ensureProviderConfigRow();
 ensureAgentLlmConfigRow();

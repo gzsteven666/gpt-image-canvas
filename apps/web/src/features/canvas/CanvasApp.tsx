@@ -77,6 +77,7 @@ import {
   GENERATION_COUNTS,
   IMAGE_SIZE_MULTIPLE,
   IMAGE_QUALITIES,
+  IMAGE_MODELS,
   MAX_AGENT_SELECTED_REFERENCES,
   MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_DIMENSION,
@@ -157,9 +158,9 @@ const MOBILE_DRAWER_MEDIA_QUERY = "(max-width: 1023px)";
 const PROMPT_POOL_CANVAS_HANDOFF_QUERY_PARAM = "poolPromptHandoff";
 const PROMPT_POOL_CANVAS_HANDOFF_STORAGE_PREFIX = "gpt-image-canvas.prompt-pool-handoff.";
 const PROMPT_POOL_CANVAS_HANDOFF_TTL_MS = 5 * 60 * 1000;
-const ASSET_PREVIEW_WIDTHS = [256, 512, 1024, 2048] as const;
+const ASSET_PREVIEW_WIDTHS = [256, 512, 1024] as const;
 type AssetPreviewWidth = (typeof ASSET_PREVIEW_WIDTHS)[number];
-const GENERATED_ASSET_INITIAL_PREVIEW_WIDTH: AssetPreviewWidth = 2048;
+const GENERATED_ASSET_INITIAL_PREVIEW_WIDTH: AssetPreviewWidth = 1024;
 const SUPPORTED_REFERENCE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
 const initialCanvasPreviewWidths = new Map<string, AssetPreviewWidth>();
 const assetMetadataCache = new Map<string, ImageSize>();
@@ -564,6 +565,7 @@ function copyableThinkingMessageText(message: Pick<AgentChatMessage, "content" |
 }
 
 interface GenerationSubmitInput {
+  model?: string;
   prompt: string;
   presetId: StylePresetId;
   sizePresetId: string;
@@ -1102,6 +1104,7 @@ function createTemporaryGenerationRecord(input: {
     presetId: input.submitInput.presetId,
     size: input.submitInput.size,
     quality: input.submitInput.quality,
+    model: input.submitInput.model,
     outputFormat: input.submitInput.outputFormat,
     count: input.submitInput.count,
     status: "running",
@@ -4000,6 +4003,7 @@ export function App() {
   const [height, setHeight] = useState(DEFAULT_SIZE.height);
   const [count, setCount] = useState<GenerationCount>(1);
   const [quality, setQuality] = useState<ImageQuality>(DEFAULT_IMAGE_QUALITY);
+  const [imageModel, setImageModel] = useState("");
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("png");
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [isProjectLoaded, setIsProjectLoaded] = useState(false);
@@ -4039,10 +4043,12 @@ export function App() {
   const [isStorageSaving, setIsStorageSaving] = useState(false);
   const [isStorageTesting, setIsStorageTesting] = useState(false);
   const [referenceSelection, setReferenceSelection] = useState<ReferenceSelection>(() => missingReferenceSelection(t));
-  const [agentSizePresetId, setAgentSizePresetId] = useState(DEFAULT_SIZE_PRESET.id);
-  const [agentWidth, setAgentWidth] = useState(DEFAULT_SIZE_PRESET.width);
-  const [agentHeight, setAgentHeight] = useState(DEFAULT_SIZE_PRESET.height);
-  const [agentQuality, setAgentQuality] = useState<ImageQuality>(DEFAULT_IMAGE_QUALITY);
+  const [agentCount, setAgentCount] = useState<GenerationCount>(1);
+  const [preserveAgentPrompt, setPreserveAgentPrompt] = useState(true);
+  const [agentSizePresetId, setAgentSizePresetId] = [sizePresetId, setSizePresetId] as const;
+  const [agentWidth, setAgentWidth] = [width, setWidth] as const;
+  const [agentHeight, setAgentHeight] = [height, setHeight] as const;
+  const [agentQuality, setAgentQuality] = [quality, setQuality] as const;
   const [agentOutputFormat, setAgentOutputFormat] = useState<OutputFormat>("png");
   const [agentInput, setAgentInput] = useState("");
   const [agentConfig, setAgentConfig] = useState<AgentLlmConfigView | null>(null);
@@ -4131,9 +4137,12 @@ export function App() {
         height: agentHeight
       },
       quality: agentQuality,
-      outputFormat: agentOutputFormat
+      model: imageModel || undefined,
+      outputFormat: agentOutputFormat,
+      count: agentCount,
+      preservePrompt: preserveAgentPrompt
     }),
-    [agentHeight, agentOutputFormat, agentQuality, agentWidth]
+    [agentHeight, agentOutputFormat, agentQuality, agentWidth, agentCount, preserveAgentPrompt, imageModel]
   );
   const agentSizeSummary = `${agentWidth} x ${agentHeight}`;
   const agentCompactSizeSummary = `${agentWidth}x${agentHeight}`;
@@ -4959,7 +4968,7 @@ export function App() {
 
       const removedAssetIds = [...previousAssetIds].filter((assetId) => !currentAssetIds.has(assetId));
       if (removedAssetIds.length > 0) {
-        void deleteGalleryRecordsForCanvasAssetIds(removedAssetIds);
+        void deleteGalleryRecordsForCanvasAssetIds(removedAssetIds, [...currentAssetIds]);
       }
     };
     const handleEditorChange = (): void => {
@@ -5267,6 +5276,7 @@ export function App() {
         sizePresetId: input.sizePresetId,
         size: input.size,
         quality: input.quality,
+        model: input.model,
         outputFormat: input.outputFormat,
         count: input.count
       };
@@ -5352,6 +5362,7 @@ export function App() {
 
   async function submitGeneration(): Promise<void> {
     const input: GenerationSubmitInput = {
+      model: imageModel || undefined,
       prompt: trimmedPrompt,
       presetId: stylePreset,
       sizePresetId,
@@ -5457,6 +5468,7 @@ export function App() {
     setHeight(record.size.height);
     syncSizeSelection(record.size.width, record.size.height);
     setQuality(record.quality);
+    setImageModel(record.model ?? "");
     setOutputFormat(record.outputFormat);
     setCount(nextCount);
 
@@ -5471,6 +5483,7 @@ export function App() {
         sizePresetId: nextSizePresetId,
         size: record.size,
         quality: record.quality,
+        model: record.model,
         outputFormat: record.outputFormat,
         count: nextCount
       },
@@ -5508,6 +5521,7 @@ export function App() {
     setHeight(item.size.height);
     syncSizeSelection(item.size.width, item.size.height);
     setQuality(item.quality);
+    setImageModel(item.model ?? "");
     setOutputFormat(item.outputFormat);
     setCount(1);
     setGenerationMode("text");
@@ -5540,7 +5554,7 @@ export function App() {
     );
   }
 
-  async function deleteGalleryRecordsForCanvasAssetIds(assetIds: string[]): Promise<void> {
+  async function deleteGalleryRecordsForCanvasAssetIds(assetIds: string[], canvasAssetIds: string[]): Promise<void> {
     if (assetIds.length === 0) {
       return;
     }
@@ -5566,8 +5580,26 @@ export function App() {
       body.deletedOutputIds
         .filter((outputId): outputId is string => typeof outputId === "string")
         .forEach(removeGalleryOutputFromHistory);
+
+      await Promise.all(
+        assetIds.map((assetId) => deleteUnreferencedAssetForAsset(assetId, canvasAssetIds).catch(() => undefined))
+      );
     } catch {
       // Canvas deletion should not be blocked if Gallery cleanup cannot be reached.
+    }
+  }
+
+  async function deleteUnreferencedAssetForAsset(assetId: string, canvasAssetIds: string[]): Promise<void> {
+    const response = await fetch(`/api/assets/${encodeURIComponent(assetId)}/orphan`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ canvasAssetIds })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Asset cleanup failed for asset ${assetId}.`);
     }
   }
 
@@ -6903,16 +6935,15 @@ export function App() {
     setAgentSizePresetId(preset.id);
     setAgentWidth(preset.width);
     setAgentHeight(preset.height);
+    syncSizeSelection(preset.width, preset.height);
   }
 
   function updateAgentWidth(value: string): void {
-    setAgentWidth(normalizeDimension(value));
-    setAgentSizePresetId(CUSTOM_SIZE_PRESET_ID);
+    updateWidth(value);
   }
 
   function updateAgentHeight(value: string): void {
-    setAgentHeight(normalizeDimension(value));
-    setAgentSizePresetId(CUSTOM_SIZE_PRESET_ID);
+    updateHeight(value);
   }
 
   async function submitAgentMessage(): Promise<void> {
@@ -7151,9 +7182,9 @@ export function App() {
       >
         {isProjectLoaded ? (
           <Tldraw
+            licenseKey={TLDRAW_LICENSE_KEY}
             assets={canvasAssetStore}
             components={tldrawComponents}
-            licenseKey={TLDRAW_LICENSE_KEY}
             options={tldrawOptions}
             snapshot={projectSnapshot}
             shapeUtils={shapeUtils}
@@ -7309,6 +7340,17 @@ export function App() {
             {t("panelTabAgent")}
           </button>
         </div>
+
+        <label className="block px-5 py-2">
+          <span className="control-label">{t("providerImageModelTab")}</span>
+          <select className="field-control w-full" data-testid="canvas-image-model" value={imageModel}
+            onChange={(event) => setImageModel(event.target.value)}>
+            <option value="">{locale === "zh-CN" ? "使用供应商默认模型" : "Provider default"}</option>
+            {Array.from(new Set([...IMAGE_MODELS, ...(imageModel ? [imageModel] : [])])).map((model) => (
+              <option key={model} value={model}>{model}</option>
+            ))}
+          </select>
+        </label>
 
         {panelTab === "manual" ? (
         <>
@@ -7788,6 +7830,23 @@ export function App() {
               {saveError}
             </p>
           ) : null}
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="agent-compact-field">
+              <span className="control-label">{t("generationCountLabel")}</span>
+              <select className="field-control" data-testid="agent-count" value={agentCount} disabled={isAgentRunning}
+                onChange={(event) => setAgentCount(Number(event.target.value) as GenerationCount)}>
+                {Array.from({ length: 16 }, (_, index) => index + 1).map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={preserveAgentPrompt} disabled={isAgentRunning}
+                onChange={(event) => setPreserveAgentPrompt(event.target.checked)} />
+              <span>{locale === "zh-CN" ? "保留原提示词" : "Keep original prompt"}</span>
+            </label>
+          </div>
 
           <div className="agent-chat-head" data-testid="agent-config-state" data-configured={isAgentConfigured}>
             <button

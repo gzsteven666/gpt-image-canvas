@@ -52,7 +52,7 @@ Each GenerationJob must include:
 - role: "final_image", "variation", "character_anchor", "style_anchor", or "reference_anchor"
 - prompt: complete image prompt
 - count: requested generated image count for this job. Must be an integer from 1 to 16.
-- size, quality, and outputFormat only when overriding defaults. quality must be "auto", "low", "medium", or "high"; outputFormat must be "png", "jpeg", or "webp".
+- size, quality, and outputFormat only when overriding defaults. quality must be "auto", "low", "medium", "high", "xhigh", or "max"; outputFormat must be "png", "jpeg", or "webp".
 - references: array of selected_canvas_image or generated_output references
 - status: "queued"
 - outputs: []

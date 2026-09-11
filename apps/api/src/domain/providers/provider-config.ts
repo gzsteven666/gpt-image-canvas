@@ -171,8 +171,8 @@ function providerSources(row: ProviderConfigRow | undefined): ProviderSourceView
       id: "codex",
       kind: "codex",
       label: "Codex",
-      available: codex.available,
-      status: codex.available ? "available" : "missing_codex_session",
+      available: false,
+      status: "missing_codex_session",
       details: {
         codex
       },
@@ -205,7 +205,7 @@ function providerSourceSummary(source: ProviderSourceView): ProviderSourceSummar
 
 function runtimeProviderForSource(sourceId: ProviderSourceId): RuntimeImageProvider {
   if (sourceId === "codex") {
-    return "codex";
+    return "none";
   }
 
   return "openai";

@@ -1,4 +1,12 @@
-import { CUSTOM_SIZE_PRESET_ID, SIZE_PRESETS, type ImageSize, type ImageSizePresetId } from "./image.js";
+import {
+  CUSTOM_SIZE_PRESET_ID,
+  SIZE_PRESETS,
+  type AspectRatioPreset,
+  type ImageSize,
+  type ImageSizePresetId,
+  type ResolutionPreset,
+  type ResolvedImageSize
+} from "./image.js";
 
 export type ValidationResult =
   | {
@@ -80,6 +88,66 @@ export function validateImageSize(size: ImageSize): ValidationResult {
 
 export function sizeToApiValue(size: ImageSize): string {
   return `${size.width}x${size.height}`;
+}
+
+function alignDimension(value: number): number {
+  return Math.max(IMAGE_SIZE_MULTIPLE, Math.round(value / IMAGE_SIZE_MULTIPLE) * IMAGE_SIZE_MULTIPLE);
+}
+
+function sizeFromLongSide(aspectRatio: AspectRatioPreset, longSide: number): ImageSize {
+  if (aspectRatio.widthRatio >= aspectRatio.heightRatio) {
+    return {
+      width: alignDimension(longSide),
+      height: alignDimension((longSide * aspectRatio.heightRatio) / aspectRatio.widthRatio)
+    };
+  }
+
+  return {
+    width: alignDimension((longSide * aspectRatio.widthRatio) / aspectRatio.heightRatio),
+    height: alignDimension(longSide)
+  };
+}
+
+export function resolveImageSizeFromAspectResolution(
+  aspectRatio: AspectRatioPreset,
+  resolution: ResolutionPreset
+): ResolvedImageSize {
+  const requestedSize = sizeFromLongSide(aspectRatio, resolution.longSide);
+  const requestedValidation = validateImageSize(requestedSize);
+
+  if (requestedValidation.ok) {
+    return {
+      size: requestedSize,
+      requestedSize,
+      adjusted: false
+    };
+  }
+
+  const shouldScaleDown =
+    requestedValidation.reason === "too_large" || requestedValidation.reason === "total_pixels_too_large";
+  const step = shouldScaleDown ? -IMAGE_SIZE_MULTIPLE : IMAGE_SIZE_MULTIPLE;
+  const boundary = shouldScaleDown ? MIN_IMAGE_DIMENSION : MAX_IMAGE_DIMENSION;
+
+  for (
+    let longSide = Math.max(MIN_IMAGE_DIMENSION, Math.min(MAX_IMAGE_DIMENSION, resolution.longSide + step));
+    shouldScaleDown ? longSide >= boundary : longSide <= boundary;
+    longSide += step
+  ) {
+    const nextSize = sizeFromLongSide(aspectRatio, longSide);
+    if (validateImageSize(nextSize).ok) {
+      return {
+        size: nextSize,
+        requestedSize,
+        adjusted: true
+      };
+    }
+  }
+
+  return {
+    size: requestedSize,
+    requestedSize,
+    adjusted: true
+  };
 }
 
 export function validateSceneImageSize(input: {

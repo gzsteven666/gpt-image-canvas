@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { readStoredAsset } from "../generation/image-generation.js";
 import { runtimePaths } from "../../infrastructure/runtime.js";
 
-const PREVIEW_WIDTHS = [256, 512, 1024, 2048] as const;
+const PREVIEW_WIDTHS = [256, 512, 1024] as const;
 const MAX_PREVIEW_WIDTH = PREVIEW_WIDTHS[PREVIEW_WIDTHS.length - 1];
 
 export type PreviewWidthResult =

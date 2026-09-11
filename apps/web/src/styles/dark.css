@@ -91,6 +91,19 @@
   background: #0f0f10;
 }
 
+.app-root[data-canvas-theme="dark"] .canvas-open-selected-image-button {
+  border-color: rgba(34, 211, 238, 0.42);
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 16px 42px rgba(2, 6, 23, 0.42);
+  color: #e0f2fe;
+}
+
+.app-root[data-canvas-theme="dark"] .canvas-open-selected-image-button:hover,
+.app-root[data-canvas-theme="dark"] .canvas-open-selected-image-button:focus-visible {
+  border-color: rgba(103, 232, 249, 0.72);
+  background: rgba(8, 47, 73, 0.95);
+}
+
 .app-root[data-canvas-theme="dark"] .ai-panel {
   border-left-color: rgb(255 255 255 / 0.08);
   background: var(--paper-panel);
@@ -555,6 +568,22 @@
   border-color: #d47b4f;
   background-color: #923b1f;
   color: #fff7ed;
+}
+
+.app-root[data-canvas-theme="dark"] .resolved-size-summary {
+  border-color: var(--line);
+  background: #161210;
+  color: var(--muted-ink);
+}
+
+.app-root[data-canvas-theme="dark"] .resolved-size-summary strong {
+  color: var(--ink);
+}
+
+.app-root[data-canvas-theme="dark"] .resolved-size-note {
+  border-color: rgb(245 158 11 / 0.28);
+  background: rgb(120 53 15 / 0.22);
+  color: #f7c879;
 }
 
 .app-root[data-canvas-theme="dark"] .prompt-chip {

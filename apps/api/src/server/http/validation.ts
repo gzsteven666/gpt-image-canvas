@@ -7,6 +7,7 @@ import {
   SIZE_PRESETS,
   STYLE_PRESETS,
   composePrompt,
+  isImageModel,
   validateSceneImageSize,
   type GenerationCount,
   type ImageQuality,
@@ -533,6 +534,9 @@ function parseBaseImagePayload(input: unknown): ParseResult<ImageProviderInput> 
   }
 
   const quality = parseQuality(input.quality);
+  if (input.model !== undefined && !isImageModel(input.model)) {
+    return { ok: false, error: errorResponse("invalid_model", "Invalid image model.") };
+  }
   if (!quality.ok) {
     return quality;
   }
@@ -556,6 +560,7 @@ function parseBaseImagePayload(input: unknown): ParseResult<ImageProviderInput> 
     ok: true,
     value: {
       originalPrompt: prompt.trim(),
+      model: input.model as string | undefined,
       clientRequestId: clientRequestId.value,
       presetId: stylePreset.value,
       prompt: composePrompt(prompt, stylePreset.value),

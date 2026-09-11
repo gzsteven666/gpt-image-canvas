@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import sharp from "sharp";
@@ -295,7 +295,19 @@ export async function saveReferenceImageInput(input: ReferenceImageInput): Promi
     throw new ProviderError("unsupported_provider_behavior", "Reference image dimensions could not be read.", 400);
   }
 
-  const assetId = randomUUID();
+  const assetId = stableUploadedAssetId(parsed.bytes);
+  const existingAsset = db.select().from(assets).where(eq(assets.id, assetId)).get();
+  if (existingAsset) {
+    return {
+      id: existingAsset.id,
+      url: `/api/assets/${existingAsset.id}`,
+      fileName: existingAsset.fileName,
+      mimeType: existingAsset.mimeType,
+      width: existingAsset.width,
+      height: existingAsset.height
+    };
+  }
+
   const extension = extensionForMimeType(parsed.mimeType);
   const fileName = `${assetId}.${extension}`;
   const relativePath = `assets/${fileName}`;
@@ -323,6 +335,10 @@ export async function saveReferenceImageInput(input: ReferenceImageInput): Promi
     width: imageSize.width,
     height: imageSize.height
   };
+}
+
+function stableUploadedAssetId(bytes: Buffer): string {
+  return `uploaded-${createHash("sha256").update(bytes).digest("hex").slice(0, 32)}`;
 }
 
 function referenceDataUrlToBytes(input: ReferenceImageInput): { bytes: Buffer; mimeType: string } {
@@ -574,6 +590,7 @@ function createRunningGenerationRecord(input: PersistedGenerationInput): Generat
       width: input.size.width,
       height: input.size.height,
       quality: input.quality,
+      model: input.model,
       outputFormat: input.outputFormat,
       count: input.count,
       status: "running",
@@ -602,6 +619,7 @@ function createRunningGenerationRecord(input: PersistedGenerationInput): Generat
     presetId: input.presetId,
     size: input.size,
     quality: input.quality,
+    model: input.model,
     outputFormat: input.outputFormat,
     count: input.count,
     status: "running",
@@ -646,6 +664,7 @@ function completeGenerationRecord(generationId: string, input: PersistedGenerati
     presetId: input.presetId,
     size: input.size,
     quality: input.quality,
+    model: input.model,
     outputFormat: input.outputFormat,
     count: input.count,
     status,
@@ -677,6 +696,7 @@ function saveCompletedGenerationRecord(generationId: string, input: PersistedGen
       width: input.size.width,
       height: input.size.height,
       quality: input.quality,
+      model: input.model,
       outputFormat: input.outputFormat,
       count: input.count,
       status,
@@ -743,6 +763,7 @@ function saveCompletedGenerationRecord(generationId: string, input: PersistedGen
     presetId: input.presetId,
     size: input.size,
     quality: input.quality,
+    model: input.model,
     outputFormat: input.outputFormat,
     count: input.count,
     status,
@@ -859,6 +880,7 @@ function readGenerationRecord(generationId: string): GenerationRecord | undefine
       height: record.height
     },
     quality: record.quality as ImageQuality,
+    model: record.model ?? undefined,
     outputFormat: record.outputFormat as OutputFormat,
     count: record.count,
     status: record.status as GenerationStatus,

@@ -12,6 +12,7 @@ import {
 import {
   GENERATION_PLAN_SCHEMA_VERSION,
   IMAGE_QUALITIES,
+  isImageModel,
   MAX_AGENT_SELECTED_REFERENCES,
   MAX_GENERATION_JOB_REFERENCES,
   MAX_GENERATION_PLAN_IMAGES,
@@ -310,6 +311,29 @@ export async function createGenerationPlan(input: AgentPlannerInput): Promise<Ag
   }
 
   const selectedReferences = selectedReferencesResult.references;
+  if (isRecord(input.defaults) && input.defaults.preservePrompt === true) {
+    const now = input.now ?? new Date();
+    const planId = `plan-${randomUUID()}`;
+    const validated = validateGenerationPlan({
+      schemaVersion: GENERATION_PLAN_SCHEMA_VERSION,
+      title: userText.slice(0, 80),
+      status: "awaiting_confirmation",
+      createdBy: "agent",
+      defaults: { ...defaultsResult.defaults, stylePresetId: "none" },
+      jobs: [{
+        id: "original_prompt",
+        role: "final_image",
+        prompt: userText,
+        count: defaultsResult.defaults.count,
+        references: selectedReferences.map((reference) => selectedReferenceForFallbackJob(reference))
+      }],
+      edges: []
+    }, { defaults: defaultsResult.defaults, selectedReferences, now, planId });
+    if (!validated.ok) {
+      return { ok: false, code: validated.code, message: validated.message, issues: validated.issues };
+    }
+    return { ok: true, plan: validated.plan };
+  }
   const selectedReferenceRequestIssue = validateSelectedReferenceEditRequest(userText, selectedReferences);
   if (selectedReferenceRequestIssue) {
     return selectedReferenceRequestIssue;
@@ -407,6 +431,13 @@ export async function createGenerationPlan(input: AgentPlannerInput): Promise<Ag
     });
 
     if (evaluation.ok) {
+      evaluation.plan.defaults.size = defaultsResult.defaults.size;
+      evaluation.plan.defaults.model = defaultsResult.defaults.model;
+      evaluation.plan.defaults.quality = defaultsResult.defaults.quality;
+      for (const job of evaluation.plan.jobs) {
+        job.size = defaultsResult.defaults.size;
+        job.quality = defaultsResult.defaults.quality;
+      }
       emitAssistantDelta(input.onAssistantDelta, ["计划已生成，请在对话卡片中检查细节并确认执行。"]);
       return {
         ok: true,
@@ -933,6 +964,9 @@ export function parseGenerationPlanDefaults(input: unknown): GenerationPlanDefau
   }
 
   const size = parseOptionalImageSize(input.size) ?? DEFAULT_PLAN_SIZE;
+  if (input.model !== undefined && !isImageModel(input.model)) {
+    return { ok: false, code: "invalid_plan_defaults", message: "Invalid image model." };
+  }
   const sizeValidation = validateSceneImageSize({ size });
   if (!sizeValidation.ok) {
     return {
@@ -951,6 +985,7 @@ export function parseGenerationPlanDefaults(input: unknown): GenerationPlanDefau
     ok: true,
     defaults: {
       size: sizeValidation.size,
+      model: input.model as string | undefined,
       quality,
       outputFormat,
       count,
@@ -1042,7 +1077,7 @@ export function buildPlannerUserMessage(input: {
     `supportsVision: ${input.supportsVision ? "true" : "false"}`,
     contextSummary,
     clarificationSummary,
-    'Allowed quality values: "auto", "low", "medium", "high". Allowed outputFormat values: "png", "jpeg", "webp". Omit job quality/outputFormat when using defaults.',
+    `Allowed quality values: ${IMAGE_QUALITIES.join(", ")}. Allowed outputFormat values: "png", "jpeg", "webp". Omit job quality/outputFormat when using defaults.`,
     referenceSummaries.length > 0
       ? `Selected canvas references, capped at ${MAX_AGENT_SELECTED_REFERENCES}:\n${referenceSummaries.join("\n")}`
       : "Selected canvas references: none",
@@ -2023,6 +2058,7 @@ function parsePlanDefaultsFromPlan(
 
   return {
     size: sizeValidation.ok ? sizeValidation.size : fallback.size,
+    model: fallback.model,
     quality: quality ?? fallback.quality,
     outputFormat: outputFormat ?? fallback.outputFormat,
     count: count ?? fallback.count,

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   composePrompt,
+  IMAGE_QUALITIES,
+  isImageModel,
   MAX_GENERATION_JOB_REFERENCES,
   MAX_GENERATION_PLAN_IMAGES,
   sizeToApiValue,
@@ -65,6 +67,7 @@ export function isExecutableGenerationPlan(value: unknown): value is GenerationP
     typeof value.title === "string" &&
     isPlanStatus(value.status) &&
     isRecord(value.defaults) &&
+    (value.defaults.model === undefined || isImageModel(value.defaults.model)) &&
     isImageSize(value.defaults.size) &&
     isQuality(value.defaults.quality) &&
     isOutputFormat(value.defaults.outputFormat) &&
@@ -319,6 +322,7 @@ function createJobImageProviderInput(plan: GenerationPlan, job: GenerationJob): 
 
   return {
     originalPrompt: job.prompt,
+    model: plan.defaults.model,
     presetId,
     prompt: composePrompt(job.prompt, presetId),
     size,
@@ -786,7 +790,7 @@ function isJobRole(value: unknown): value is GenerationJob["role"] {
 }
 
 function isQuality(value: unknown): value is ImageQuality {
-  return isOneOf(value, ["auto", "low", "medium", "high"]);
+  return isOneOf(value, IMAGE_QUALITIES);
 }
 
 function isOutputFormat(value: unknown): value is OutputFormat {

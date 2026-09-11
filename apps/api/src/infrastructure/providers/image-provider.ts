@@ -9,6 +9,7 @@ import {
 } from "../../domain/contracts.js";
 
 export interface ImageProviderInput {
+  model?: string;
   originalPrompt: string;
   clientRequestId?: string;
   presetId: string;
@@ -66,11 +67,13 @@ const MAX_REFERENCE_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_PROVIDER_IMAGE_BYTES = 100 * 1024 * 1024;
 const SUPPORTED_REFERENCE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
 
-type FlexibleImageGenerateParams = Omit<ImageGenerateParamsNonStreaming, "size"> & {
+type FlexibleImageGenerateParams = Omit<ImageGenerateParamsNonStreaming, "size" | "quality"> & {
+  quality: ImageQuality;
   size: string;
 };
 
-type FlexibleImageEditParams = Omit<ImageEditParamsNonStreaming, "size"> & {
+type FlexibleImageEditParams = Omit<ImageEditParamsNonStreaming, "size" | "quality"> & {
+  quality: ImageQuality;
   size: string;
 };
 
@@ -122,10 +125,14 @@ class OpenAIImageProvider implements ImageProvider {
   private readonly client: OpenAI;
 
   constructor(private readonly config: OpenAIImageProviderConfig) {
+    const isAzureOpenAI = isAzureOpenAIBaseUrl(config.baseURL);
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      timeout: config.timeoutMs
+      timeout: config.timeoutMs,
+      // Azure's OpenAI-compatible v1 endpoint requires its own header and preview API version.
+      defaultHeaders: isAzureOpenAI ? { "api-key": config.apiKey } : undefined,
+      defaultQuery: isAzureOpenAI ? { "api-version": "preview" } : undefined
     });
   }
 
@@ -133,7 +140,7 @@ class OpenAIImageProvider implements ImageProvider {
     try {
       const response = await this.client.images.generate(
         imageGenerateRequestBody({
-          model: this.config.model,
+          model: input.model ?? this.config.model,
           prompt: input.prompt,
           size: input.sizeApiValue,
           quality: input.quality,
@@ -143,7 +150,7 @@ class OpenAIImageProvider implements ImageProvider {
         { signal }
       );
 
-      return await normalizeProviderResponse(response, input.sizeApiValue, this.config.model, signal);
+      return await normalizeProviderResponse(response, input.sizeApiValue, input.model ?? this.config.model, signal);
     } catch (error) {
       throw toProviderError(error);
     }
@@ -154,7 +161,7 @@ class OpenAIImageProvider implements ImageProvider {
       const references = await Promise.all(input.referenceImages.map((referenceImage) => dataUrlToFile(referenceImage)));
       const response = await this.client.images.edit(
         imageEditRequestBody({
-          model: this.config.model,
+          model: input.model ?? this.config.model,
           image: references,
           prompt: input.prompt,
           size: input.sizeApiValue,
@@ -165,10 +172,22 @@ class OpenAIImageProvider implements ImageProvider {
         { signal }
       );
 
-      return await normalizeProviderResponse(response, input.sizeApiValue, this.config.model, signal);
+      return await normalizeProviderResponse(response, input.sizeApiValue, input.model ?? this.config.model, signal);
     } catch (error) {
       throw toProviderError(error);
     }
+  }
+}
+
+function isAzureOpenAIBaseUrl(baseURL: string | undefined): boolean {
+  if (!baseURL) {
+    return false;
+  }
+
+  try {
+    return new URL(baseURL).hostname.endsWith(".openai.azure.com");
+  } catch {
+    return false;
   }
 }
 

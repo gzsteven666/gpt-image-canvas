@@ -1,8 +1,12 @@
 export const IMAGE_MODEL = "gpt-image-2" as const;
+export const IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"] as const;
 
 export type ImageModel = string;
+export function isImageModel(value: unknown): value is ImageModel {
+  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(value);
+}
 export type ImageMode = "generate" | "edit";
-export type ImageQuality = "auto" | "low" | "medium" | "high";
+export type ImageQuality = "auto" | "low" | "medium" | "high" | "xhigh" | "max";
 export type OutputFormat = "png" | "jpeg" | "webp";
 export type GenerationStatus = "pending" | "running" | "succeeded" | "partial" | "failed" | "cancelled";
 export type OutputStatus = "succeeded" | "failed";
@@ -76,7 +80,7 @@ export const STYLE_PRESETS = [
 
 export type StylePresetId = (typeof STYLE_PRESETS)[number]["id"];
 
-export const IMAGE_QUALITIES: ImageQuality[] = ["auto", "low", "medium", "high"];
+export const IMAGE_QUALITIES: ImageQuality[] = ["auto", "low", "medium", "high", "xhigh", "max"];
 export const OUTPUT_FORMATS: OutputFormat[] = ["png", "jpeg", "webp"];
 export const GENERATION_COUNTS = [1, 2, 4, 8, 16] as const;
 export type GenerationCount = (typeof GENERATION_COUNTS)[number];
@@ -87,6 +91,45 @@ export interface ImageSize {
 }
 
 export type ResolutionTier = "1K" | "2K" | "4K";
+
+export interface AspectRatioPreset {
+  id: string;
+  label: string;
+  widthRatio: number;
+  heightRatio: number;
+  description: string;
+}
+
+export interface ResolutionPreset {
+  id: string;
+  label: ResolutionTier;
+  longSide: number;
+  description: string;
+}
+
+export interface ResolvedImageSize {
+  size: ImageSize;
+  requestedSize: ImageSize;
+  adjusted: boolean;
+}
+
+export const ASPECT_RATIO_PRESETS: AspectRatioPreset[] = [
+  { id: "1-1", label: "1:1", widthRatio: 1, heightRatio: 1, description: "Square" },
+  { id: "4-3", label: "4:3", widthRatio: 4, heightRatio: 3, description: "Classic landscape" },
+  { id: "3-4", label: "3:4", widthRatio: 3, heightRatio: 4, description: "Classic portrait" },
+  { id: "3-2", label: "3:2", widthRatio: 3, heightRatio: 2, description: "Photo landscape" },
+  { id: "2-3", label: "2:3", widthRatio: 2, heightRatio: 3, description: "Photo portrait" },
+  { id: "16-9", label: "16:9", widthRatio: 16, heightRatio: 9, description: "Widescreen" },
+  { id: "9-16", label: "9:16", widthRatio: 9, heightRatio: 16, description: "Vertical video" },
+  { id: "21-9", label: "21:9", widthRatio: 21, heightRatio: 9, description: "Ultrawide" },
+  { id: "9-21", label: "9:21", widthRatio: 9, heightRatio: 21, description: "Ultra-tall" }
+];
+
+export const RESOLUTION_PRESETS: ResolutionPreset[] = [
+  { id: "1k", label: "1K", longSide: 1024, description: "Fast standard resolution" },
+  { id: "2k", label: "2K", longSide: 2048, description: "High resolution" },
+  { id: "4k", label: "4K", longSide: 3840, description: "Maximum supported resolution" }
+];
 
 export interface AssetMetadataResponse extends ImageSize {
   id: string;

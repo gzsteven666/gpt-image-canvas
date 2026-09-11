@@ -1,8 +1,10 @@
 export {
+  ASPECT_RATIO_PRESETS,
   CUSTOM_SIZE_PRESET_ID,
   GENERATION_COUNTS,
   GENERATION_PLAN_SCHEMA_VERSION,
   IMAGE_MODEL,
+  IMAGE_MODELS,
   IMAGE_QUALITIES,
   MAX_AGENT_SELECTED_REFERENCES,
   MAX_GENERATION_JOB_REFERENCES,
@@ -12,9 +14,12 @@ export {
   MIN_IMAGE_DIMENSION,
   OUTPUT_FORMATS,
   PROVIDER_SOURCE_IDS,
+  RESOLUTION_PRESETS,
   SIZE_PRESETS,
   STYLE_PRESETS,
   composePrompt,
+  isImageModel,
+  resolveImageSizeFromAspectResolution,
   sizeToApiValue,
   validateImageSize,
   validateSceneImageSize
@@ -22,6 +27,7 @@ export {
 
 export type {
   AppConfig,
+  AspectRatioPreset,
   AuthStatusResponse,
   AssetMetadataResponse,
   AssetCloudUploadStatus,
@@ -78,6 +84,9 @@ export type {
   ProviderSourceSummary,
   ProviderSourceView,
   ReferenceImageInput,
+  ResolutionPreset,
+  ResolutionTier,
+  ResolvedImageSize,
   RuntimeImageProvider,
   AgentConversation,
   AgentConversationAssetPreview,

@@ -62,6 +62,7 @@ export interface AgentSelectedCanvasReference {
 }
 
 export interface GenerationPlanDefaults {
+  model?: string;
   size: ImageSize;
   quality: ImageQuality;
   outputFormat: OutputFormat;
@@ -143,6 +144,7 @@ export type GenerationPlanValidationResult =
     };
 
 export interface GenerateImageRequest {
+  model?: string;
   prompt: string;
   clientRequestId?: string;
   presetId: StylePresetId;
@@ -185,6 +187,7 @@ export interface GenerationOutput {
 }
 
 export interface GenerationRecord {
+  model?: string;
   id: string;
   mode: ImageMode;
   prompt: string;
@@ -207,6 +210,7 @@ export interface GenerationResponse {
 }
 
 export interface GalleryImageItem {
+  model?: string;
   outputId: string;
   generationId: string;
   mode: ImageMode;

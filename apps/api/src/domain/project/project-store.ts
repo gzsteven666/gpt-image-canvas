@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type {
@@ -49,6 +49,16 @@ export interface GalleryExportAsset {
   assetId: string;
   fileName: string;
   mimeType: string;
+}
+
+export interface DeleteUnreferencedAssetResult {
+  deleted: boolean;
+  reason?: "not_found" | "canvas_reference" | "database_reference";
+}
+
+export interface GalleryAssetPurgeResult {
+  deletedAssetIds: string[];
+  deletedFileCount: number;
 }
 
 export class ProjectStoreUnavailableError extends Error {
@@ -207,15 +217,24 @@ export function getGalleryImages(): GalleryResponse {
         height: generation.height
       },
       quality: generation.quality as ImageQuality,
+      model: generation.model ?? undefined,
       outputFormat: generation.outputFormat as OutputFormat,
       createdAt: output.createdAt,
       asset: toGeneratedAsset(asset)
-    })).filter((item): item is GalleryImageItem => Boolean(item.asset))
+    })).filter((item): item is typeof item & GalleryImageItem => Boolean(item.asset))
   };
 }
 
 export function deleteGalleryOutput(outputId: string): boolean {
+  const output = db.select().from(generationOutputs).where(eq(generationOutputs.id, outputId)).get();
+  if (!output) {
+    return false;
+  }
+
   const result = db.delete(generationOutputs).where(eq(generationOutputs.id, outputId)).run();
+  if (result.changes > 0 && output.assetId) {
+    deleteAssetWhenNoGalleryOutput(output.assetId);
+  }
   return result.changes > 0;
 }
 
@@ -248,6 +267,70 @@ export function deleteGalleryOutputsByAssetIds(assetIds: string[]): string[] {
     .all();
 
   return deleteGalleryOutputs(rows.map((row) => row.outputId));
+}
+
+export function deleteUnreferencedAsset(
+  assetId: string,
+  options: { canvasAssetIds?: string[] } = {}
+): DeleteUnreferencedAssetResult {
+  const trimmedAssetId = assetId.trim();
+  if (!trimmedAssetId) {
+    return { deleted: false, reason: "not_found" };
+  }
+
+  const asset = db.select().from(assets).where(eq(assets.id, trimmedAssetId)).get();
+  if (!asset) {
+    return { deleted: false, reason: "not_found" };
+  }
+
+  const canvasAssetIds = options.canvasAssetIds
+    ? new Set(options.canvasAssetIds.map(normalizeAssetId).filter((id): id is string => Boolean(id)))
+    : currentProjectCanvasAssetIds();
+  if (canvasAssetIds.has(trimmedAssetId)) {
+    return { deleted: false, reason: "canvas_reference" };
+  }
+
+  if (assetHasDatabaseReferences(trimmedAssetId)) {
+    return { deleted: false, reason: "database_reference" };
+  }
+
+  db.delete(assets).where(eq(assets.id, trimmedAssetId)).run();
+  deleteAssetFile(asset.relativePath);
+  deleteAssetPreviewFiles(trimmedAssetId);
+  return { deleted: true };
+}
+
+export function purgeAssetsOutsideGallery(): GalleryAssetPurgeResult {
+  const retainedAssetIds = new Set(
+    db.select({ assetId: generationOutputs.assetId })
+      .from(generationOutputs)
+      .where(and(eq(generationOutputs.status, "succeeded")))
+      .all()
+      .flatMap((row) => row.assetId ? [row.assetId] : [])
+  );
+  const allAssets = db.select().from(assets).all();
+  const candidates = allAssets.filter((asset) => !retainedAssetIds.has(asset.id));
+  const deletedAssetIds = candidates.map((asset) => asset.id);
+  const retainedPaths = new Set(allAssets.filter((asset) => retainedAssetIds.has(asset.id)).map((asset) => asset.relativePath));
+
+  if (deletedAssetIds.length > 0) {
+    removeAssetsFromProjectSnapshot(deletedAssetIds);
+    for (const asset of candidates) {
+      deleteAssetAndReferences(asset);
+    }
+  }
+  removeMissingDatabaseAssetRecordsFromProjectSnapshot(retainedAssetIds);
+
+  let deletedFileCount = 0;
+  for (const fileName of safeReadDir(runtimePaths.assetsDir)) {
+    const relativePath = `assets/${fileName}`;
+    if (!retainedPaths.has(relativePath)) {
+      rmSync(join(runtimePaths.assetsDir, fileName), { force: true });
+      deletedFileCount += 1;
+    }
+  }
+
+  return { deletedAssetIds, deletedFileCount };
 }
 
 export function getGalleryExportAssets(outputIds: string[]): GalleryExportAsset[] {
@@ -364,6 +447,217 @@ function snapshotStore(snapshot: unknown): Record<string, unknown> | undefined {
   }
 
   return isRecord(snapshot.store) ? snapshot.store : undefined;
+}
+
+function currentProjectCanvasAssetIds(): Set<string> {
+  const current = getDefaultProjectRow();
+  const store = current ? snapshotStore(parseSnapshot(current.snapshotJson)) : undefined;
+  return store ? canvasAssetIdsFromStore(store) : new Set();
+}
+
+function canvasAssetIdsFromStore(store: Record<string, unknown>): Set<string> {
+  const assetIds = new Set<string>();
+  for (const [key, value] of Object.entries(store)) {
+    if (!key.startsWith("asset:") || !isRecord(value)) {
+      continue;
+    }
+
+    const props = value.props;
+    if (!isRecord(props)) {
+      continue;
+    }
+
+    const assetId = normalizeAssetId(props.assetId);
+    if (assetId) {
+      assetIds.add(assetId);
+    }
+  }
+
+  return assetIds;
+}
+
+function normalizeAssetId(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function assetHasDatabaseReferences(assetId: string): boolean {
+  const output = db.select({ id: generationOutputs.id }).from(generationOutputs).where(eq(generationOutputs.assetId, assetId)).get();
+  if (output) {
+    return true;
+  }
+
+  const reference = db
+    .select({ id: generationReferenceAssets.generationId })
+    .from(generationReferenceAssets)
+    .where(eq(generationReferenceAssets.assetId, assetId))
+    .get();
+  if (reference) {
+    return true;
+  }
+
+  const legacyReference = db
+    .select({ id: generationRecords.id })
+    .from(generationRecords)
+    .where(eq(generationRecords.referenceAssetId, assetId))
+    .get();
+  return Boolean(legacyReference);
+}
+
+function deleteAssetWhenNoGalleryOutput(assetId: string): void {
+  const hasGalleryOutput = db.select({ id: generationOutputs.id })
+    .from(generationOutputs)
+    .where(and(eq(generationOutputs.assetId, assetId), eq(generationOutputs.status, "succeeded")))
+    .get();
+  if (hasGalleryOutput) {
+    return;
+  }
+
+  const asset = db.select().from(assets).where(eq(assets.id, assetId)).get();
+  if (!asset) {
+    return;
+  }
+
+  removeAssetsFromProjectSnapshot([assetId]);
+  deleteAssetAndReferences(asset);
+}
+
+function deleteAssetAndReferences(asset: typeof assets.$inferSelect): void {
+  db.delete(generationReferenceAssets).where(eq(generationReferenceAssets.assetId, asset.id)).run();
+  db.update(generationRecords).set({ referenceAssetId: null }).where(eq(generationRecords.referenceAssetId, asset.id)).run();
+  db.delete(generationOutputs).where(eq(generationOutputs.assetId, asset.id)).run();
+  db.delete(assets).where(eq(assets.id, asset.id)).run();
+  deleteAssetFile(asset.relativePath);
+  deleteAssetPreviewFiles(asset.id);
+}
+
+function removeAssetsFromProjectSnapshot(assetIds: string[]): void {
+  const current = getDefaultProjectRow();
+  if (!current || assetIds.length === 0) {
+    return;
+  }
+
+  const snapshot = parseSnapshot(current.snapshotJson);
+  const store = snapshotStore(snapshot);
+  if (!store) {
+    return;
+  }
+
+  const tldrawAssetIds = new Set(assetIds.map((assetId) => `asset:${assetId}`));
+  let changed = false;
+  for (const [recordId, record] of Object.entries(store)) {
+    if (tldrawAssetIds.has(recordId)) {
+      delete store[recordId];
+      changed = true;
+      continue;
+    }
+
+    if (!isRecord(record) || record.typeName !== "shape" || record.type !== "image" || !isRecord(record.props)) {
+      continue;
+    }
+
+    if (typeof record.props.assetId === "string" && tldrawAssetIds.has(record.props.assetId)) {
+      delete store[recordId];
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  const updatedAt = nowIso();
+  const snapshotJson = JSON.stringify(snapshot);
+  tryWriteProjectSnapshotBackup(current.snapshotJson, updatedAt);
+  db.update(projects)
+    .set({ snapshotJson, updatedAt })
+    .where(eq(projects.id, DEFAULT_PROJECT_ID))
+    .run();
+}
+
+function removeMissingDatabaseAssetRecordsFromProjectSnapshot(validAssetIds: Set<string>): void {
+  const current = getDefaultProjectRow();
+  if (!current) {
+    return;
+  }
+
+  const snapshot = parseSnapshot(current.snapshotJson);
+  const store = snapshotStore(snapshot);
+  if (!store) {
+    return;
+  }
+
+  const validTldrawAssetIds = new Set([...validAssetIds].map((assetId) => `asset:${assetId}`));
+  let changed = false;
+  for (const [recordId, record] of Object.entries(store)) {
+    if (!isRecord(record)) {
+      continue;
+    }
+
+    if (record.typeName === "asset" && record.type === "image" && recordId.startsWith("asset:") && !validTldrawAssetIds.has(recordId)) {
+      delete store[recordId];
+      changed = true;
+      continue;
+    }
+
+    if (record.typeName === "shape" && record.type === "image" && isRecord(record.props)) {
+      const assetId = record.props.assetId;
+      if (typeof assetId === "string" && assetId.startsWith("asset:") && !validTldrawAssetIds.has(assetId)) {
+        delete store[recordId];
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  const updatedAt = nowIso();
+  tryWriteProjectSnapshotBackup(current.snapshotJson, updatedAt);
+  db.update(projects)
+    .set({ snapshotJson: JSON.stringify(snapshot), updatedAt })
+    .where(eq(projects.id, DEFAULT_PROJECT_ID))
+    .run();
+}
+
+function deleteAssetFile(relativePathValue: string): void {
+  const filePath = resolve(runtimePaths.dataDir, relativePathValue);
+  if (!isInsideDirectory(filePath, runtimePaths.assetsDir)) {
+    return;
+  }
+
+  rmSync(filePath, { force: true });
+}
+
+function deleteAssetPreviewFiles(assetId: string): void {
+  const prefix = `${safeFileSegment(assetId)}-`;
+  for (const fileName of safeReadDir(runtimePaths.assetPreviewsDir)) {
+    if (fileName.startsWith(prefix) && fileName.endsWith(".webp")) {
+      rmSync(join(runtimePaths.assetPreviewsDir, fileName), { force: true });
+    }
+  }
+}
+
+function safeReadDir(directory: string): string[] {
+  try {
+    return readdirSync(directory);
+  } catch {
+    return [];
+  }
+}
+
+function safeFileSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/gu, "_");
+}
+
+function isInsideDirectory(filePath: string, directory: string): boolean {
+  const localPath = relative(directory, filePath);
+  return Boolean(localPath) && !localPath.startsWith("..") && !isAbsolute(localPath);
 }
 
 function tryWriteProjectSnapshotBackup(snapshotJson: string, updatedAt: string): void {
@@ -543,6 +837,7 @@ function readGenerationHistory(): ApiGenerationRecord[] {
         height: record.height
       },
       quality: record.quality as ImageQuality,
+      model: record.model ?? undefined,
       outputFormat: record.outputFormat as OutputFormat,
       count: record.count,
       status: record.status as GenerationStatus,

@@ -51,6 +51,7 @@ const creativeReferenceUserText =
   "\u57fa\u4e8e\u4e0a\u4f20\u56fe\u7247\u751f\u62103\u5f20\u513f\u7ae5\u827a\u672f\u5199\u771f\uff0c\u4e0d\u62d8\u6ce5\u4e8e\u52a8\u4f5c\u548c\u59ff\u52bf\uff0c\u53ef\u7231\u98ce\u548c\u5947\u5e7b\u98ce\u3002";
 
 async function main(): Promise<void> {
+  await smokeOriginalPrompt();
   smokeValidSimplePlan();
   smokeMultiPromptPlan();
   smokeSelectedReferencePlan();
@@ -101,6 +102,26 @@ async function main(): Promise<void> {
   smokeModelJobRoleAliases();
 
   console.log("agent planner smoke checks passed");
+}
+
+async function smokeOriginalPrompt(): Promise<void> {
+  for (const references of [[], selectedReferences]) {
+    const userText = "Keep this exact prompt.\nNo extra directions.";
+    const result = await createGenerationPlan({
+      userText,
+      defaults: { ...defaults, size: { width: 3840, height: 2160 }, quality: "high", count: 5, preservePrompt: true },
+      selectedReferences: references,
+      llmConfig: llmConfigFixture(),
+      runner: { async invoke() { throw new Error("Original prompt must bypass rewriting"); } }
+    });
+    expectPlannerOk(result, "original prompt plan");
+    expect(result.plan.jobs.length === 1, "one batch without extra anchors");
+    expect(result.plan.jobs[0]?.prompt === userText, "prompt remains unchanged");
+    expect(result.plan.jobs[0]?.count === 5, "selected count is retained");
+    expect(result.plan.defaults.size.width === 3840 && result.plan.defaults.size.height === 2160, "manual size is retained");
+    expect(result.plan.defaults.quality === "high", "manual quality is retained");
+    expect(result.plan.jobs[0]?.references.length === references.length, "selected references are retained");
+  }
 }
 
 function smokeValidSimplePlan(): void {

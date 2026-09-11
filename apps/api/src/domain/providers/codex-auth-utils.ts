@@ -62,11 +62,13 @@ export function selectImageProviderName(input: {
   openaiApiKey?: string | null;
   codexSessionAvailable: boolean;
 }): RuntimeImageProvider {
+  void input.codexSessionAvailable;
+
   if (input.openaiApiKey?.trim()) {
     return "openai";
   }
 
-  return input.codexSessionAvailable ? "codex" : "none";
+  return "none";
 }
 
 export function parseCodexJwtClaims(jwt: string): ParsedCodexJwtClaims | undefined {
