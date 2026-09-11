@@ -163,8 +163,9 @@ type AssetPreviewWidth = (typeof ASSET_PREVIEW_WIDTHS)[number];
 const GENERATED_ASSET_INITIAL_PREVIEW_WIDTH: AssetPreviewWidth = 1024;
 const SUPPORTED_REFERENCE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
 const initialCanvasPreviewWidths = new Map<string, AssetPreviewWidth>();
-const assetMetadataCache = new Map<string, ImageSize>();
-const assetMetadataRequests = new Map<string, Promise<ImageSize | undefined>>();
+type CachedAssetMetadata = ImageSize & Pick<AssetMetadataResponse, "model">;
+const assetMetadataCache = new Map<string, CachedAssetMetadata>();
+const assetMetadataRequests = new Map<string, Promise<CachedAssetMetadata | undefined>>();
 const RESOLUTION_BADGE_BASE_OFFSET = 7;
 const RESOLUTION_BADGE_MIN_SCALE = 0.52;
 const RESOLUTION_BADGE_SMALL_IMAGE_SIDE = 32;
@@ -2033,13 +2034,14 @@ interface ClientPoint {
 
 function CanvasResolutionBadgeOverlay() {
   const editor = useEditor();
+  const { t } = useI18n();
   const pointerClientPoint = usePointerClientPoint(editor);
   const target = useValue("canvas resolution badge target", () => getCanvasResolutionBadgeTarget(editor, pointerClientPoint), [
     editor,
     pointerClientPoint?.x,
     pointerClientPoint?.y
   ]);
-  const [loadedMetadata, setLoadedMetadata] = useState<{ assetId: string; size: ImageSize } | undefined>();
+  const [loadedMetadata, setLoadedMetadata] = useState<{ assetId: string; size: CachedAssetMetadata } | undefined>();
 
   const localAssetId = target?.localAssetId;
   const cachedMetadata = localAssetId ? assetMetadataCache.get(localAssetId) : undefined;
@@ -2047,7 +2049,7 @@ function CanvasResolutionBadgeOverlay() {
   const resolvedSize = localAssetId ? (cachedMetadata ?? loadedSize) : target?.fallbackSize;
 
   useEffect(() => {
-    if (!localAssetId || assetMetadataCache.has(localAssetId)) {
+    if (!localAssetId || assetMetadataCache.get(localAssetId)?.model !== undefined) {
       return;
     }
 
@@ -2081,7 +2083,7 @@ function CanvasResolutionBadgeOverlay() {
         )}px, 0) scale(${target.badgeScale})`
       }}
     >
-      {tier}
+      {tier} · {cachedMetadata?.model || loadedSize?.model || t("imageModelUnknown")}
     </span>
   );
 }
@@ -2290,15 +2292,15 @@ function isUsableImageSize(size: { width?: unknown; height?: unknown; w?: unknow
   return typeof width === "number" && typeof height === "number" && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0;
 }
 
-function rememberAssetMetadata(assetId: string, size: ImageSize): void {
+function rememberAssetMetadata(assetId: string, size: CachedAssetMetadata): void {
   if (isUsableImageSize(size)) {
-    assetMetadataCache.set(assetId, size);
+    assetMetadataCache.set(assetId, { ...assetMetadataCache.get(assetId), ...size });
   }
 }
 
-async function fetchAssetMetadata(assetId: string): Promise<ImageSize | undefined> {
+async function fetchAssetMetadata(assetId: string): Promise<CachedAssetMetadata | undefined> {
   const cached = assetMetadataCache.get(assetId);
-  if (cached) {
+  if (cached?.model !== undefined) {
     return cached;
   }
 
@@ -2316,7 +2318,8 @@ async function fetchAssetMetadata(assetId: string): Promise<ImageSize | undefine
       const body = (await response.json()) as AssetMetadataResponse;
       const size = {
         width: body.width,
-        height: body.height
+        height: body.height,
+        model: body.model ?? null
       };
 
       if (body.id !== assetId || !isUsableImageSize(size)) {
@@ -7699,6 +7702,10 @@ export function App() {
                           {excerpt}
                         </p>
                         <dl className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs leading-5 text-neutral-500">
+                          <div className="w-full min-w-0 break-words" data-testid="history-image-model">
+                            <dt className="inline">{t("providerImageModelTab")}: </dt>
+                            <dd className="inline">{record.model || t("imageModelUnknown")}</dd>
+                          </div>
                           <div className="inline-flex items-center gap-1">
                             <dt className="sr-only">{t("generationHistorySize")}</dt>
                             <dd>

@@ -55,6 +55,7 @@ export interface StoredAssetFile {
 }
 
 interface BatchOutputResult {
+  model?: string;
   id: string;
   status: "succeeded" | "failed";
   asset?: GeneratedAsset;
@@ -425,6 +426,9 @@ export async function readStoredAssetMetadata(assetId: string): Promise<AssetMet
 
   return {
     id: asset.file.id,
+    model: db.select({ model: generationRecords.model }).from(generationOutputs)
+      .innerJoin(generationRecords, eq(generationRecords.id, generationOutputs.generationId))
+      .where(eq(generationOutputs.assetId, assetId)).get()?.model ?? null,
     width: size.width,
     height: size.height
   };
@@ -459,6 +463,7 @@ async function generateSingleOutput(input: ImageProviderInput, provider: ImagePr
       id: outputId,
       status: "succeeded",
       asset: saved.asset,
+      model: result.model,
       cloudStorage: saved.cloudStorage
     };
   } catch (error) {
@@ -503,6 +508,7 @@ async function editSingleOutput(input: EditImageProviderInput, provider: ImagePr
       id: outputId,
       status: "succeeded",
       asset: saved.asset,
+      model: result.model,
       cloudStorage: saved.cloudStorage
     };
   } catch (error) {
@@ -631,6 +637,7 @@ function createRunningGenerationRecord(input: PersistedGenerationInput): Generat
 }
 
 function completeGenerationRecord(generationId: string, input: PersistedGenerationInput, outputs: BatchOutputResult[]): GenerationRecord {
+  input = { ...input, model: outputs.find((output) => output.model)?.model ?? input.model };
   const existing = readGenerationRecord(generationId);
   if (existing && isTerminalGenerationStatus(existing.status)) {
     return existing;
@@ -647,6 +654,7 @@ function completeGenerationRecord(generationId: string, input: PersistedGenerati
     .set({
       status,
       error: error ?? null,
+      model: input.model,
       referenceAssetId: primaryReferenceAssetId ?? null
     })
     .where(eq(generationRecords.id, generationId))
@@ -677,6 +685,7 @@ function completeGenerationRecord(generationId: string, input: PersistedGenerati
 }
 
 function saveCompletedGenerationRecord(generationId: string, input: PersistedGenerationInput, outputs: BatchOutputResult[]): GenerationRecord {
+  input = { ...input, model: outputs.find((output) => output.model)?.model ?? input.model };
   const createdAt = new Date().toISOString();
   const successCount = outputs.filter((output) => output.status === "succeeded").length;
   const failureCount = outputs.length - successCount;

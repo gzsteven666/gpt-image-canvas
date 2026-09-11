@@ -129,13 +129,15 @@
 }
 
 .canvas-resolution-badge {
+  max-width: min(18rem, 75vw);
+  overflow-wrap: anywhere;
   position: absolute;
   top: 0;
   left: 0;
   z-index: 30;
   display: inline-flex;
   min-width: 1.75rem;
-  height: 1.15rem;
+  min-height: 1.15rem;
   align-items: center;
   justify-content: center;
   border: 1px solid rgb(255 253 248 / 0.72);

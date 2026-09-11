@@ -21,7 +21,7 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const { createOpenAIImageProvider } = await import("../infrastructure/providers/image-provider.js");
 const { parseGeneratePayload, parseEditPayload } = await import("../server/http/validation.js");
-const { runTextToImageGeneration, runReferenceImageGeneration, getGenerationRecord } = await import("../domain/generation/image-generation.js");
+const { runTextToImageGeneration, runReferenceImageGeneration, getGenerationRecord, readStoredAssetMetadata, createRunningTextToImageGeneration, finishTextToImageGeneration } = await import("../domain/generation/image-generation.js");
 const { getGalleryImages } = await import("../domain/project/project-store.js");
 const { createGenerationPlan } = await import("../domain/agent/planner.js");
 const { isExecutableGenerationPlan, executeGenerationPlan } = await import("../domain/agent/executor.js");
@@ -37,6 +37,7 @@ try {
       const generated = await runTextToImageGeneration(parsed.value, provider);
       assert.equal(generated.record.status, "succeeded");
       assert.equal(getGenerationRecord(generated.record.id)?.model, model);
+      assert.equal((await readStoredAssetMetadata(generated.record.outputs[0]!.asset!.id))?.model, model);
       const sent = JSON.parse(requests.at(-1)!.body);
       assert.equal(sent.model, model);
       assert.equal(sent.quality, quality);
@@ -65,6 +66,12 @@ try {
     }
   }
   assert(getGalleryImages().items.every((item) => item.model?.startsWith("gpt-image-2.5")));
+  const defaultPayload = parseGeneratePayload({ prompt: "Default model", size: { width: 1024, height: 1024 }, count: 1 });
+  assert(defaultPayload.ok);
+  const running = createRunningTextToImageGeneration(defaultPayload.value);
+  const completed = await finishTextToImageGeneration(running.id, defaultPayload.value, provider);
+  assert.equal(completed.model, "gpt-image-2");
+  assert.equal((await readStoredAssetMetadata(completed.outputs[0]!.asset!.id))?.model, "gpt-image-2");
   assert.equal(parseGeneratePayload({ prompt: "test", size: { width: 1024, height: 1024 }, model: 42 }).ok, false);
   console.log("Image model, quality, generation/edit, Agent and history checks passed");
 } finally {

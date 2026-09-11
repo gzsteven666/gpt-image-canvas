@@ -133,6 +133,7 @@ export const RESOLUTION_PRESETS: ResolutionPreset[] = [
 
 export interface AssetMetadataResponse extends ImageSize {
   id: string;
+  model?: string | null;
 }
 
 export function resolutionTierForSize(size: ImageSize): ResolutionTier {
