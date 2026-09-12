@@ -15,7 +15,7 @@ let hold = true;
 const server = createServer(async (req, res) => {
   if (req.url?.endsWith("/models")) {
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ data: [{ id: "gpt-image-2" }, { id: "gpt-image-2.5" }, { id: "gpt-5.5" }] }));
+    res.end(JSON.stringify({ data: [{ id: "gpt-image-2" }, { id: "gpt-image-2.5" }, { id: "gpt-5.5" }, { id: "gemini-3.1-flash-image" }] }));
     return;
   }
   for await (const _chunk of req) { /* Consume the image request. */ }

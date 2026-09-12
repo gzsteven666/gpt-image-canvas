@@ -28,7 +28,7 @@ export function registerProviderConfigRoutes(app: Hono): void {
       if (!response.ok) throw new Error("Model discovery unavailable");
       const body = await response.json() as { data?: { id?: unknown }[] };
       for (const item of Array.isArray(body.data) ? body.data : []) {
-        if (typeof item.id === "string" && /image|dall-e|flux|imagen/i.test(item.id)) models.add(item.id);
+        if (typeof item.id === "string" && /^(gpt-image-|dall-e-)/i.test(item.id)) models.add(item.id);
       }
       return c.json({ models: [...models], discovered: true });
     } catch {
