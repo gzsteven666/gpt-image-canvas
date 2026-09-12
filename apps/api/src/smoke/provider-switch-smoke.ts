@@ -67,6 +67,11 @@ try {
   const fallback = await (await app.request("/api/provider-config/env-openai/models")).json();
   assert.equal(fallback.discovered, false);
   assert(fallback.models.length > 0);
+  process.env.OPENAI_BASE_URL = "https://test.services.ai.azure.com/openai/v1";
+  process.env.OPENAI_IMAGE_MODELS = "gpt-image-2, gpt-image-2.5-flare,gpt-image-2.5-sunburst";
+  const azure = await (await app.request("/api/provider-config/env-openai/models")).json();
+  assert.deepEqual(azure.models, ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]);
+  assert.equal(azure.discovered, false);
   delete process.env.OPENAI_API_KEY;
   await assert.rejects(createConfiguredImageProvider(undefined, "env-openai"));
   assert.equal((await createConfiguredImageProvider()).providerSourceId, "local-openai");

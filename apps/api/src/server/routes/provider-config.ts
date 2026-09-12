@@ -17,6 +17,11 @@ export function registerProviderConfigRoutes(app: Hono): void {
       : sourceId === "local-openai" ? getLocalOpenAIImageProviderConfig() : undefined;
     if (!config) return c.json({ models: [], discovered: false });
     const models = new Set([config.model]);
+    if (sourceId === "env-openai") {
+      for (const model of (process.env.OPENAI_IMAGE_MODELS ?? "").split(",").map((value) => value.trim()).filter(Boolean)) {
+        models.add(model);
+      }
+    }
     try {
       const base = (config.baseURL || "https://api.openai.com/v1").replace(/\/+$/, "");
       const url = new URL(base + "/models");
