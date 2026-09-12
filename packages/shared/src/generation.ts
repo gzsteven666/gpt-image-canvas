@@ -187,6 +187,8 @@ export interface GenerationOutput {
 }
 
 export interface GenerationRecord {
+  providerSourceId?: string;
+  providerLabel?: string;
   model?: string;
   id: string;
   mode: ImageMode;
@@ -210,6 +212,8 @@ export interface GenerationResponse {
 }
 
 export interface GalleryImageItem {
+  providerSourceId?: string;
+  providerLabel?: string;
   model?: string;
   outputId: string;
   generationId: string;

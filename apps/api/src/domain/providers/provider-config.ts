@@ -17,6 +17,7 @@ import { db } from "../../infrastructure/database.js";
 import {
   DEFAULT_OPENAI_IMAGE_TIMEOUT_MS,
   getConfiguredImageModel,
+  parseOpenAIImageEndpointMode,
   parseOpenAIImageTimeoutMs,
   type OpenAIImageProviderConfig
 } from "../../infrastructure/providers/image-provider.js";
@@ -103,6 +104,7 @@ export function getEnvironmentOpenAIImageProviderConfig(): OpenAIImageProviderCo
   return {
     apiKey,
     baseURL: baseURL || undefined,
+    endpointMode: parseOpenAIImageEndpointMode(process.env.OPENAI_IMAGE_ENDPOINT),
     model: getConfiguredImageModel(),
     timeoutMs: parseOpenAIImageTimeoutMs(process.env.OPENAI_IMAGE_TIMEOUT_MS)
   };
@@ -144,7 +146,7 @@ function providerSources(row: ProviderConfigRow | undefined): ProviderSourceView
     {
       id: "env-openai",
       kind: "environment",
-      label: "Environment OpenAI API",
+      label: providerDisplayName("env-openai", envConfig?.baseURL),
       available: Boolean(envConfig),
       status: envConfig ? "available" : "missing_api_key",
       details: {
@@ -157,7 +159,7 @@ function providerSources(row: ProviderConfigRow | undefined): ProviderSourceView
     {
       id: "local-openai",
       kind: "local",
-      label: "Custom OpenAI-compatible API",
+      label: providerDisplayName("local-openai", localConfig?.baseURL),
       available: Boolean(localConfig),
       status: localConfig ? "available" : "missing_api_key",
       details: {
@@ -171,8 +173,8 @@ function providerSources(row: ProviderConfigRow | undefined): ProviderSourceView
       id: "codex",
       kind: "codex",
       label: "Codex",
-      available: false,
-      status: "missing_codex_session",
+      available: codex.available,
+      status: codex.available ? "available" : "missing_codex_session",
       details: {
         codex
       },
@@ -205,7 +207,7 @@ function providerSourceSummary(source: ProviderSourceView): ProviderSourceSummar
 
 function runtimeProviderForSource(sourceId: ProviderSourceId): RuntimeImageProvider {
   if (sourceId === "codex") {
-    return "none";
+    return "codex";
   }
 
   return "openai";
@@ -342,4 +344,17 @@ function validTimeoutMs(value: number | null | undefined): number | undefined {
 
 function isDefined<T>(value: T | undefined): value is T {
   return value !== undefined;
+}
+
+export function providerDisplayName(sourceId: string, baseURL?: string): string {
+  if (sourceId === "codex") return "Codex";
+  if (baseURL) {
+    try {
+      const url = new URL(baseURL);
+      if (url.hostname.endsWith(".services.ai.azure.com") || url.hostname.endsWith(".openai.azure.com")) return "Azure";
+      if (url.port === "8317") return "CPA";
+      return url.hostname;
+    } catch { /* Use the source name when the URL is invalid. */ }
+  }
+  return sourceId === "env-openai" ? "OpenAI (environment)" : "OpenAI (custom)";
 }

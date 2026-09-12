@@ -520,6 +520,10 @@ function parseBaseImagePayload(input: unknown): ParseResult<ImageProviderInput> 
     return size;
   }
 
+  if (input.providerSourceId !== undefined && !["env-openai", "local-openai", "codex"].includes(input.providerSourceId as string)) {
+    return { ok: false, error: errorResponse("invalid_provider", "Unknown image provider.") };
+  }
+
   const sizePresetId = parseOptionalString(input.sizePresetId) ?? parseOptionalString(input.scenePresetId) ?? parseSizePresetFromPresetId(input.presetId);
   const resolvedSize = validateSceneImageSize({
     size: size.value,
@@ -560,6 +564,7 @@ function parseBaseImagePayload(input: unknown): ParseResult<ImageProviderInput> 
     ok: true,
     value: {
       originalPrompt: prompt.trim(),
+      providerSourceId: input.providerSourceId as string | undefined,
       model: input.model as string | undefined,
       clientRequestId: clientRequestId.value,
       presetId: stylePreset.value,

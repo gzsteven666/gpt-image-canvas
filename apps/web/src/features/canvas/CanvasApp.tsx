@@ -77,7 +77,8 @@ import {
   GENERATION_COUNTS,
   IMAGE_SIZE_MULTIPLE,
   IMAGE_QUALITIES,
-  IMAGE_MODELS,
+  type ProviderConfigResponse,
+  type ProviderSourceId,
   MAX_AGENT_SELECTED_REFERENCES,
   MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_DIMENSION,
@@ -566,6 +567,7 @@ function copyableThinkingMessageText(message: Pick<AgentChatMessage, "content" |
 }
 
 interface GenerationSubmitInput {
+  providerSourceId?: string;
   model?: string;
   prompt: string;
   presetId: StylePresetId;
@@ -3555,7 +3557,7 @@ function providerStatusDetails(authStatus: AuthStatusResponse | null, isAuthLoad
       return {
         copy: t("providerStatusLocalCopy"),
         provider: "openai",
-        title: t("providerStatusLocalTitle")
+        title: authStatus.activeSource.label
       };
     }
 
@@ -3563,7 +3565,7 @@ function providerStatusDetails(authStatus: AuthStatusResponse | null, isAuthLoad
       return {
         copy: t("providerStatusEnvCopy"),
         provider: "openai",
-        title: t("providerStatusEnvTitle")
+        title: authStatus.activeSource.label
       };
     }
 
@@ -4007,6 +4009,45 @@ export function App() {
   const [count, setCount] = useState<GenerationCount>(1);
   const [quality, setQuality] = useState<ImageQuality>(DEFAULT_IMAGE_QUALITY);
   const [imageModel, setImageModel] = useState("");
+  const [canvasProviders, setCanvasProviders] = useState<ProviderConfigResponse | null>(null);
+  const [providerSwitchPending, setProviderSwitchPending] = useState(false);
+  const [providerModels, setProviderModels] = useState<string[]>([]);
+  const selectedImageSource = canvasProviders?.activeSource?.id;
+  const selectedSourceModel = canvasProviders?.sources.find((item) => item.id === selectedImageSource)?.details.model;
+  useEffect(() => {
+    const controller = new AbortController();
+    setImageModel("");
+    setProviderModels(selectedSourceModel ? [selectedSourceModel] : []);
+    if (selectedImageSource) {
+      void fetch(`/api/provider-config/${selectedImageSource}/models`, { signal: controller.signal })
+        .then(async (response) => {
+          if (response.ok) {
+            const data = await response.json() as { models: string[] };
+            if (!controller.signal.aborted) setProviderModels(data.models);
+          }
+        }).catch(() => {});
+    }
+    return () => controller.abort();
+  }, [selectedImageSource, selectedSourceModel]);
+
+  async function switchCanvasProvider(sourceId: ProviderSourceId) {
+    if (!canvasProviders || providerSwitchPending) return;
+    setProviderSwitchPending(true);
+    try {
+      const response = await fetch("/api/provider-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceOrder: [sourceId, ...canvasProviders.sourceOrder.filter((id) => id !== sourceId)] })
+      });
+      if (!response.ok) throw new Error("Provider switch failed");
+      setCanvasProviders(await response.json() as ProviderConfigResponse);
+      await loadAuthStatus();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProviderSwitchPending(false);
+    }
+  }
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("png");
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [isProjectLoaded, setIsProjectLoaded] = useState(false);
@@ -4175,7 +4216,7 @@ export function App() {
   const referenceValidationMessage = isReferenceMode && !isReferenceReady ? referenceSelection.hint : "";
   const validationMessage = promptValidationMessage || dimensionValidationMessage || referenceValidationMessage;
   const shouldShowValidation = Boolean(validationMessage);
-  const canGenerate = !validationMessage;
+  const canGenerate = !validationMessage && !providerSwitchPending && Boolean(selectedImageSource);
   const tldrawComponents = useMemo(
     () =>
       ({
@@ -4284,6 +4325,8 @@ export function App() {
 
       const status = (await response.json()) as AuthStatusResponse;
       setAuthStatus(status);
+      const configResponse = await fetch("/api/provider-config", { signal });
+      if (configResponse.ok) setCanvasProviders(await configResponse.json() as ProviderConfigResponse);
       return status;
     } catch (error) {
       if (signal?.aborted) {
@@ -5280,6 +5323,7 @@ export function App() {
         size: input.size,
         quality: input.quality,
         model: input.model,
+        providerSourceId: input.providerSourceId ?? selectedImageSource,
         outputFormat: input.outputFormat,
         count: input.count
       };
@@ -5365,6 +5409,7 @@ export function App() {
 
   async function submitGeneration(): Promise<void> {
     const input: GenerationSubmitInput = {
+      providerSourceId: selectedImageSource,
       model: imageModel || undefined,
       prompt: trimmedPrompt,
       presetId: stylePreset,
@@ -7344,16 +7389,29 @@ export function App() {
           </button>
         </div>
 
-        <label className="block px-5 py-2">
+        <div className="grid grid-cols-2 gap-3 px-5 py-2">
+        <label className="min-w-0">
+          <span className="control-label">{locale === "zh-CN" ? "供应商" : "Provider"}</span>
+          <select className="field-control w-full" data-testid="canvas-image-provider"
+            value={selectedImageSource ?? ""} disabled={providerSwitchPending || !canvasProviders}
+            onChange={(event) => void switchCanvasProvider(event.target.value as ProviderSourceId)}>
+            {!selectedImageSource && <option value="">{locale === "zh-CN" ? "未配置" : "Not configured"}</option>}
+            {canvasProviders?.sources.map((source) => (
+              <option key={source.id} value={source.id} disabled={!source.available}>{source.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="min-w-0">
           <span className="control-label">{t("providerImageModelTab")}</span>
           <select className="field-control w-full" data-testid="canvas-image-model" value={imageModel}
             onChange={(event) => setImageModel(event.target.value)}>
             <option value="">{locale === "zh-CN" ? "使用供应商默认模型" : "Provider default"}</option>
-            {Array.from(new Set([...IMAGE_MODELS, ...(imageModel ? [imageModel] : [])])).map((model) => (
+            {Array.from(new Set([...providerModels, ...(imageModel ? [imageModel] : [])])).map((model) => (
               <option key={model} value={model}>{model}</option>
             ))}
           </select>
         </label>
+        </div>
 
         {panelTab === "manual" ? (
         <>
@@ -7704,7 +7762,7 @@ export function App() {
                         <dl className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs leading-5 text-neutral-500">
                           <div className="w-full min-w-0 break-words" data-testid="history-image-model">
                             <dt className="inline">{t("providerImageModelTab")}: </dt>
-                            <dd className="inline">{record.model || t("imageModelUnknown")}</dd>
+                            <dd className="inline">{record.providerLabel || (locale === "zh-CN" ? "来源未记录" : "Unknown provider")} · {record.model || t("imageModelUnknown")}</dd>
                           </div>
                           <div className="inline-flex items-center gap-1">
                             <dt className="sr-only">{t("generationHistorySize")}</dt>

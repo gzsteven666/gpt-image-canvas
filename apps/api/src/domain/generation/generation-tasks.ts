@@ -23,29 +23,31 @@ export function initializeGenerationTaskManager(): void {
   markInterruptedGenerationRecordsFailed();
 }
 
-export function startTextToImageGenerationTask(input: ImageProviderInput): GenerationRecord {
+export async function startTextToImageGenerationTask(input: ImageProviderInput): Promise<GenerationRecord> {
+  const provider = await createConfiguredImageProvider(undefined, input.providerSourceId);
+  input = { ...input, providerSourceId: provider.providerSourceId, providerLabel: provider.providerLabel };
   const record = createRunningTextToImageGeneration(input);
   if (isTerminalGenerationStatus(record.status) || activeGenerationTasks.has(record.id)) {
     return record;
   }
 
   startBackgroundGenerationTask(record.id, async (signal) => {
-    const provider = await createConfiguredImageProvider(signal);
-    await finishTextToImageGeneration(record.id, input, provider, signal);
+    await finishTextToImageGeneration(record.id, { ...input, providerSourceId: provider.providerSourceId, providerLabel: provider.providerLabel }, provider, signal);
   });
 
   return record;
 }
 
 export async function startReferenceImageGenerationTask(input: EditImageProviderInput): Promise<GenerationRecord> {
+  const provider = await createConfiguredImageProvider(undefined, input.providerSourceId);
+  input = { ...input, providerSourceId: provider.providerSourceId, providerLabel: provider.providerLabel };
   const running = await createRunningReferenceImageGeneration(input);
   if (isTerminalGenerationStatus(running.record.status) || activeGenerationTasks.has(running.record.id)) {
     return running.record;
   }
 
   startBackgroundGenerationTask(running.record.id, async (signal) => {
-    const provider = await createConfiguredImageProvider(signal);
-    await finishReferenceImageGeneration(running.record.id, running.input, provider, signal);
+    await finishReferenceImageGeneration(running.record.id, { ...running.input, providerSourceId: provider.providerSourceId, providerLabel: provider.providerLabel }, provider, signal);
   });
 
   return running.record;

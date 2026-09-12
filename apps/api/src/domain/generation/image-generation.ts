@@ -103,6 +103,7 @@ const mimeTypes: Record<OutputFormat, string> = {
 };
 
 export async function runTextToImageGeneration(input: ImageProviderInput, provider: ImageProvider, signal?: AbortSignal): Promise<GenerationResponse> {
+  input = { ...input, providerSourceId: provider.providerSourceId, providerLabel: provider.providerLabel };
   const outputs = await mapWithConcurrency(
     Array.from({ length: input.count }, (_, index) => index),
     BATCH_CONCURRENCY,
@@ -128,6 +129,7 @@ export async function runReferenceImageGeneration(
   provider: ImageProvider,
   signal?: AbortSignal
 ): Promise<GenerationResponse> {
+  input = { ...input, providerSourceId: provider.providerSourceId, providerLabel: provider.providerLabel };
   const referenceAssetIds = await ensureReferenceAssetIds(input);
   const inputWithReferenceAssets: EditImageProviderInput = {
     ...input,
@@ -440,6 +442,7 @@ async function generateSingleOutput(input: ImageProviderInput, provider: ImagePr
   try {
     throwIfAborted(signal);
     const result = await callProviderWithRetry(
+      provider,
       () =>
         provider.generate(
           {
@@ -485,6 +488,7 @@ async function editSingleOutput(input: EditImageProviderInput, provider: ImagePr
   try {
     throwIfAborted(signal);
     const result = await callProviderWithRetry(
+      provider,
       () =>
         provider.edit(
           {
@@ -597,6 +601,8 @@ function createRunningGenerationRecord(input: PersistedGenerationInput): Generat
       height: input.size.height,
       quality: input.quality,
       model: input.model,
+      providerSourceId: input.providerSourceId,
+      providerLabel: input.providerLabel,
       outputFormat: input.outputFormat,
       count: input.count,
       status: "running",
@@ -626,6 +632,8 @@ function createRunningGenerationRecord(input: PersistedGenerationInput): Generat
     size: input.size,
     quality: input.quality,
     model: input.model,
+    providerSourceId: input.providerSourceId,
+    providerLabel: input.providerLabel,
     outputFormat: input.outputFormat,
     count: input.count,
     status: "running",
@@ -655,6 +663,8 @@ function completeGenerationRecord(generationId: string, input: PersistedGenerati
       status,
       error: error ?? null,
       model: input.model,
+      providerSourceId: input.providerSourceId,
+      providerLabel: input.providerLabel,
       referenceAssetId: primaryReferenceAssetId ?? null
     })
     .where(eq(generationRecords.id, generationId))
@@ -673,6 +683,8 @@ function completeGenerationRecord(generationId: string, input: PersistedGenerati
     size: input.size,
     quality: input.quality,
     model: input.model,
+    providerSourceId: input.providerSourceId,
+    providerLabel: input.providerLabel,
     outputFormat: input.outputFormat,
     count: input.count,
     status,
@@ -706,6 +718,8 @@ function saveCompletedGenerationRecord(generationId: string, input: PersistedGen
       height: input.size.height,
       quality: input.quality,
       model: input.model,
+      providerSourceId: input.providerSourceId,
+      providerLabel: input.providerLabel,
       outputFormat: input.outputFormat,
       count: input.count,
       status,
@@ -773,6 +787,8 @@ function saveCompletedGenerationRecord(generationId: string, input: PersistedGen
     size: input.size,
     quality: input.quality,
     model: input.model,
+    providerSourceId: input.providerSourceId,
+    providerLabel: input.providerLabel,
     outputFormat: input.outputFormat,
     count: input.count,
     status,
@@ -890,6 +906,8 @@ function readGenerationRecord(generationId: string): GenerationRecord | undefine
     },
     quality: record.quality as ImageQuality,
     model: record.model ?? undefined,
+    providerSourceId: record.providerSourceId ?? undefined,
+    providerLabel: record.providerLabel ?? undefined,
     outputFormat: record.outputFormat as OutputFormat,
     count: record.count,
     status: record.status as GenerationStatus,
@@ -1096,7 +1114,16 @@ async function mapWithConcurrency<T, TResult>(
   return results;
 }
 
-async function callProviderWithRetry<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+async function callProviderWithRetry<T>(
+  provider: ImageProvider,
+  operation: () => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> {
+  if (provider.retryTransientErrors === false) {
+    throwIfAborted(signal);
+    return operation();
+  }
+
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= TRANSIENT_PROVIDER_RETRY_DELAYS_MS.length; attempt += 1) {

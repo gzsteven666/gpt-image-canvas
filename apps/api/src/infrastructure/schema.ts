@@ -140,6 +140,8 @@ export const codexOAuthTokens = sqliteTable("codex_oauth_tokens", {
 });
 
 export const generationRecords = sqliteTable("generation_records", {
+  providerSourceId: text("provider_source_id"),
+  providerLabel: text("provider_label"),
   model: text("model"),
   id: text("id").primaryKey(),
   mode: text("mode").notNull(),

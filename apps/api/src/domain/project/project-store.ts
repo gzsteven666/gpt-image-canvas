@@ -218,6 +218,8 @@ export function getGalleryImages(): GalleryResponse {
       },
       quality: generation.quality as ImageQuality,
       model: generation.model ?? undefined,
+      providerSourceId: generation.providerSourceId ?? undefined,
+      providerLabel: generation.providerLabel ?? undefined,
       outputFormat: generation.outputFormat as OutputFormat,
       createdAt: output.createdAt,
       asset: toGeneratedAsset(asset)
@@ -838,6 +840,8 @@ function readGenerationHistory(): ApiGenerationRecord[] {
       },
       quality: record.quality as ImageQuality,
       model: record.model ?? undefined,
+      providerSourceId: record.providerSourceId ?? undefined,
+      providerLabel: record.providerLabel ?? undefined,
       outputFormat: record.outputFormat as OutputFormat,
       count: record.count,
       status: record.status as GenerationStatus,

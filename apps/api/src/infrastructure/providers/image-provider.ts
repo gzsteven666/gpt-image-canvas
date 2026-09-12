@@ -9,6 +9,8 @@ import {
 } from "../../domain/contracts.js";
 
 export interface ImageProviderInput {
+  providerSourceId?: string;
+  providerLabel?: string;
   model?: string;
   originalPrompt: string;
   clientRequestId?: string;
@@ -39,6 +41,9 @@ export interface ProviderResult {
 }
 
 export interface ImageProvider {
+  providerSourceId?: string;
+  providerLabel?: string;
+  retryTransientErrors?: boolean;
   generate(input: ImageProviderInput, signal?: AbortSignal): Promise<ProviderResult>;
   edit(input: EditImageProviderInput, signal?: AbortSignal): Promise<ProviderResult>;
 }
@@ -58,9 +63,12 @@ export class ProviderError extends Error {
 export interface OpenAIImageProviderConfig {
   apiKey: string;
   baseURL?: string;
+  endpointMode?: OpenAIImageEndpointMode;
   model: string;
   timeoutMs: number;
 }
+
+export type OpenAIImageEndpointMode = "images" | "chat-completions";
 
 export const DEFAULT_OPENAI_IMAGE_TIMEOUT_MS = 20 * 60 * 1000;
 const MAX_REFERENCE_IMAGE_BYTES = 50 * 1024 * 1024;
@@ -68,12 +76,12 @@ const MAX_PROVIDER_IMAGE_BYTES = 100 * 1024 * 1024;
 const SUPPORTED_REFERENCE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
 
 type FlexibleImageGenerateParams = Omit<ImageGenerateParamsNonStreaming, "size" | "quality"> & {
-  quality: ImageQuality;
+  quality: ImageQuality | undefined;
   size: string;
 };
 
 type FlexibleImageEditParams = Omit<ImageEditParamsNonStreaming, "size" | "quality"> & {
-  quality: ImageQuality;
+  quality: ImageQuality | undefined;
   size: string;
 };
 
@@ -103,6 +111,7 @@ export function getOpenAIImageProviderConfig():
     config: {
       apiKey,
       baseURL: baseURL || undefined,
+      endpointMode: parseOpenAIImageEndpointMode(process.env.OPENAI_IMAGE_ENDPOINT),
       model: getConfiguredImageModel(),
       timeoutMs: parseOpenAIImageTimeoutMs(process.env.OPENAI_IMAGE_TIMEOUT_MS)
     }
@@ -117,33 +126,51 @@ export function parseOpenAIImageTimeoutMs(value: string | undefined): number {
   return parsePositiveInteger(value, DEFAULT_OPENAI_IMAGE_TIMEOUT_MS);
 }
 
+export function parseOpenAIImageEndpointMode(value: string | undefined): OpenAIImageEndpointMode {
+  return value?.trim().toLowerCase() === "chat-completions" ? "chat-completions" : "images";
+}
+
 export function createOpenAIImageProvider(config: OpenAIImageProviderConfig): ImageProvider {
   return new OpenAIImageProvider(config);
 }
 
 class OpenAIImageProvider implements ImageProvider {
+  readonly retryTransientErrors = false;
   private readonly client: OpenAI;
+  private readonly isAzureEndpoint: boolean;
 
   constructor(private readonly config: OpenAIImageProviderConfig) {
-    const isAzureOpenAI = isAzureOpenAIBaseUrl(config.baseURL);
+    this.isAzureEndpoint = isAzureOpenAIEndpoint(config.baseURL);
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      timeout: config.timeoutMs,
-      // Azure's OpenAI-compatible v1 endpoint requires its own header and preview API version.
-      defaultHeaders: isAzureOpenAI ? { "api-key": config.apiKey } : undefined,
-      defaultQuery: isAzureOpenAI ? { "api-version": "preview" } : undefined
+      ...(this.isAzureEndpoint
+        ? {
+            defaultHeaders: { Authorization: null, "api-key": config.apiKey },
+            defaultQuery: { "api-version": "preview" }
+          }
+        : {}),
+      maxRetries: 0,
+      timeout: config.timeoutMs
     });
   }
 
   async generate(input: ImageProviderInput, signal?: AbortSignal): Promise<ProviderResult> {
     try {
+      if (this.config.endpointMode === "chat-completions") {
+        return await this.chatCompletion(input, [], signal);
+      }
+
+      if (this.isAzureEndpoint) {
+        return await this.azureGenerate(input, signal);
+      }
+
       const response = await this.client.images.generate(
         imageGenerateRequestBody({
           model: input.model ?? this.config.model,
           prompt: input.prompt,
           size: input.sizeApiValue,
-          quality: input.quality,
+          quality: providerImageQuality(input.quality, this.isAzureEndpoint),
           output_format: input.outputFormat,
           n: input.count
         }),
@@ -156,8 +183,48 @@ class OpenAIImageProvider implements ImageProvider {
     }
   }
 
+  private async azureGenerate(input: ImageProviderInput, signal?: AbortSignal): Promise<ProviderResult> {
+    const baseURL = this.config.baseURL?.replace(/\/+$/, "");
+    if (!baseURL) {
+      throw new ProviderError("missing_provider", "Azure OpenAI 图像服务缺少 BASE URL。", 500);
+    }
+
+    const quality = providerImageQuality(input.quality, true);
+    const response = await fetch(`${baseURL}/images/generations?api-version=preview`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": this.config.apiKey
+      },
+      body: JSON.stringify({
+        model: input.model ?? this.config.model,
+        prompt: input.prompt,
+        n: input.count,
+        size: input.sizeApiValue,
+        ...(quality ? { quality } : {}),
+        output_format: input.outputFormat
+      }),
+      signal
+    });
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      throw new ProviderError(
+        "upstream_failure",
+        providerResponseErrorMessage(responseText) || `Azure OpenAI 图像服务请求失败（HTTP ${response.status}）。`,
+        providerHttpStatus(response.status)
+      );
+    }
+
+    return normalizeProviderResponse(responseText, input.sizeApiValue, input.model ?? this.config.model, signal);
+  }
+
   async edit(input: EditImageProviderInput, signal?: AbortSignal): Promise<ProviderResult> {
     try {
+      if (this.config.endpointMode === "chat-completions") {
+        return await this.chatCompletion(input, input.referenceImages, signal);
+      }
+
       const references = await Promise.all(input.referenceImages.map((referenceImage) => dataUrlToFile(referenceImage)));
       const response = await this.client.images.edit(
         imageEditRequestBody({
@@ -165,7 +232,7 @@ class OpenAIImageProvider implements ImageProvider {
           image: references,
           prompt: input.prompt,
           size: input.sizeApiValue,
-          quality: input.quality,
+          quality: providerImageQuality(input.quality, this.isAzureEndpoint),
           output_format: input.outputFormat,
           n: input.count
         }),
@@ -177,17 +244,35 @@ class OpenAIImageProvider implements ImageProvider {
       throw toProviderError(error);
     }
   }
-}
 
-function isAzureOpenAIBaseUrl(baseURL: string | undefined): boolean {
-  if (!baseURL) {
-    return false;
-  }
+  private async chatCompletion(
+    input: ImageProviderInput,
+    referenceImages: ReferenceImageInput[],
+    signal?: AbortSignal
+  ): Promise<ProviderResult> {
+    const content = referenceImages.length
+      ? [
+          { type: "text", text: input.prompt },
+          ...referenceImages.map((reference) => ({
+            type: "image_url",
+            image_url: { url: reference.dataUrl }
+          }))
+        ]
+      : input.prompt;
+    const response = await this.client.post<unknown>("/chat/completions", {
+      body: {
+        model: input.model ?? this.config.model,
+        messages: [{ role: "user", content }],
+        n: input.count,
+        output_format: input.outputFormat,
+        quality: input.quality,
+        size: input.sizeApiValue,
+        stream: false
+      },
+      signal
+    });
 
-  try {
-    return new URL(baseURL).hostname.endsWith(".openai.azure.com");
-  } catch {
-    return false;
+    return normalizeChatCompletionResponse(response, input.sizeApiValue, input.model ?? this.config.model, signal);
   }
 }
 
@@ -199,6 +284,41 @@ function imageGenerateRequestBody(body: FlexibleImageGenerateParams): ImageGener
 function imageEditRequestBody(body: FlexibleImageEditParams): ImageEditParamsNonStreaming {
   // The SDK's image size union can lag gpt-image-2's documented flexible-size support.
   return body as unknown as ImageEditParamsNonStreaming;
+}
+
+function isAzureOpenAIEndpoint(baseURL: string | undefined): boolean {
+  if (!baseURL) {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(baseURL).hostname.toLowerCase();
+    return hostname.endsWith(".services.ai.azure.com") || hostname.endsWith(".openai.azure.com");
+  } catch {
+    return false;
+  }
+}
+
+function providerImageQuality(quality: ImageQuality, isAzureEndpoint: boolean): ImageQuality | undefined {
+  return isAzureEndpoint && quality === "auto" ? undefined : quality;
+}
+
+function providerResponseErrorMessage(responseText: string): string | undefined {
+  try {
+    const payload = JSON.parse(responseText) as unknown;
+    if (!isRecord(payload)) {
+      return undefined;
+    }
+
+    const error = payload.error;
+    if (isRecord(error) && typeof error.message === "string") {
+      return error.message;
+    }
+
+    return typeof payload.message === "string" ? payload.message : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function toProviderError(error: unknown): Error {
@@ -281,10 +401,6 @@ function parseProviderImagesResponse(response: ProviderImagesResponse): unknown 
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 async function providerImageFromResponseItem(item: unknown, signal?: AbortSignal): Promise<ProviderImage> {
   if (!isRecord(item)) {
     return {
@@ -307,6 +423,89 @@ async function providerImageFromResponseItem(item: unknown, signal?: AbortSignal
   return {
     b64Json: ""
   };
+}
+
+async function normalizeChatCompletionResponse(
+  response: unknown,
+  sizeApiValue: string,
+  model: string,
+  signal?: AbortSignal
+): Promise<ProviderResult> {
+  const candidates = chatCompletionImageCandidates(response);
+  if (candidates.length === 0) {
+    throw new ProviderError("unsupported_provider_behavior", "Chat Completions 没有返回可识别的图像结果。", 502);
+  }
+
+  const images = await Promise.all(
+    candidates.map(async (candidate) => ({
+      b64Json: candidate.kind === "base64" ? candidate.value : await downloadProviderImageUrl(candidate.value, signal)
+    }))
+  );
+
+  return {
+    model,
+    size: sizeApiValue,
+    images
+  };
+}
+
+type ChatImageCandidate = { kind: "base64" | "url"; value: string };
+
+function chatCompletionImageCandidates(response: unknown): ChatImageCandidate[] {
+  const candidates: ChatImageCandidate[] = [];
+  const seen = new Set<string>();
+
+  function add(kind: ChatImageCandidate["kind"], value: unknown): void {
+    if (typeof value !== "string" || !value.trim()) {
+      return;
+    }
+    const normalized = value.trim();
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      candidates.push({ kind, value: normalized });
+    }
+  }
+
+  function visit(value: unknown, key?: string): void {
+    if (typeof value === "string") {
+      if (key === "b64_json") {
+        add("base64", value);
+        return;
+      }
+
+      for (const match of value.matchAll(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=_-]+/giu)) {
+        add("url", match[0]);
+      }
+      for (const match of value.matchAll(/https?:\/\/[^\s)'"<>]+/giu)) {
+        add("url", match[0]);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, key));
+      return;
+    }
+
+    if (!isRecord(value)) {
+      return;
+    }
+
+    for (const [childKey, childValue] of Object.entries(value)) {
+      if (childKey === "url" && typeof childValue === "string") {
+        add("url", childValue);
+      } else {
+        visit(childValue, childKey);
+      }
+    }
+  }
+
+  visit(response);
+  return candidates;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 async function downloadProviderImageUrl(url: string, signal?: AbortSignal): Promise<string> {

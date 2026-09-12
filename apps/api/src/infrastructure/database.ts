@@ -281,6 +281,8 @@ ensureColumn("agent_skills", "files_json", "files_json TEXT NOT NULL DEFAULT '{}
 
 migrateStorageConfigRows();
 ensureColumn("generation_records", "model", "model TEXT");
+ensureColumn("generation_records", "provider_source_id", "provider_source_id TEXT");
+ensureColumn("generation_records", "provider_label", "provider_label TEXT");
 backfillGenerationReferenceAssets();
 ensureProviderConfigRow();
 ensureAgentLlmConfigRow();
