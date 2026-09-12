@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { BaseBoxShapeUtil, HTMLContainer, RecordProps, T, TLShape } from "tldraw";
 import { useI18n } from "../../shared/i18n";
 
@@ -28,156 +27,6 @@ export type GenerationPlaceholderShape = TLShape<typeof GENERATION_PLACEHOLDER_T
 function conciseError(message: string, fallback: string): string {
   const trimmed = message.trim() || fallback;
   return trimmed.length > 46 ? `${trimmed.slice(0, 46)}...` : trimmed;
-}
-
-const PARTICLE_COUNT = 60;
-const PARTICLE_COLORS = ["#D4B990", "#E8DCCC", "#C2A373", "#FFFFFF", "#FDFBF7"] as const;
-
-interface ChampagneParticle {
-  x: number;
-  y: number;
-  baseRadius: number;
-  vx: number;
-  vy: number;
-  color: (typeof PARTICLE_COLORS)[number];
-  breathSpeed: number;
-  phase: number;
-}
-
-function createChampagneParticle(width: number, height: number): ChampagneParticle {
-  return {
-    x: Math.random() * Math.max(width, 1),
-    y: Math.random() * Math.max(height, 1),
-    baseRadius: Math.random() * 1.5 + 0.5,
-    vx: (Math.random() - 0.5) * 0.3,
-    vy: (Math.random() - 0.5) * 0.3,
-    color: PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)] ?? PARTICLE_COLORS[0],
-    breathSpeed: Math.random() * 0.015 + 0.005,
-    phase: Math.random() * Math.PI * 2
-  };
-}
-
-function updateChampagneParticle(particle: ChampagneParticle, width: number, height: number) {
-  particle.x += particle.vx;
-  particle.y += particle.vy;
-
-  if (particle.x < 0 || particle.x > width) {
-    particle.vx *= -1;
-    particle.x = Math.min(Math.max(particle.x, 0), width);
-  }
-  if (particle.y < 0 || particle.y > height) {
-    particle.vy *= -1;
-    particle.y = Math.min(Math.max(particle.y, 0), height);
-  }
-
-  particle.phase += particle.breathSpeed;
-}
-
-function drawChampagneParticle(context: CanvasRenderingContext2D, particle: ChampagneParticle) {
-  const breath = (Math.sin(particle.phase) + 1) / 2;
-  const radius = particle.baseRadius + breath * 2.5;
-  const alpha = 0.1 + breath * 0.7;
-
-  context.beginPath();
-  context.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
-  context.fillStyle = particle.color;
-  context.shadowBlur = 10 + breath * 15;
-  context.shadowColor = particle.color;
-  context.globalAlpha = alpha;
-  context.fill();
-  context.globalAlpha = 1;
-  context.shadowBlur = 0;
-}
-
-function ChampagneParticleCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !context) {
-      return;
-    }
-
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let particles: ChampagneParticle[] = [];
-    let animationFrame = 0;
-    let width = 0;
-    let height = 0;
-
-    const rebuildParticles = () => {
-      particles = Array.from({ length: PARTICLE_COUNT }, () => createChampagneParticle(width, height));
-    };
-
-    const resizeCanvas = () => {
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const nextWidth = Math.max(1, rect.width);
-      const nextHeight = Math.max(1, rect.height);
-      const displayWidth = Math.max(1, Math.round(nextWidth * dpr));
-      const displayHeight = Math.max(1, Math.round(nextHeight * dpr));
-
-      if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-        canvas.width = displayWidth;
-        canvas.height = displayHeight;
-      }
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      if (width !== nextWidth || height !== nextHeight || particles.length === 0) {
-        width = nextWidth;
-        height = nextHeight;
-        rebuildParticles();
-      }
-    };
-
-    const renderFrame = (now: number, shouldUpdate: boolean) => {
-      resizeCanvas();
-      context.clearRect(0, 0, width, height);
-
-      const globalBreath = (Math.sin(now * 0.001) + 1) / 2;
-      const gradient = context.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width * 0.8);
-      gradient.addColorStop(0, `rgba(255, 255, 255, ${0.1 + globalBreath * 0.15})`);
-      gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-
-      context.fillStyle = gradient;
-      context.fillRect(0, 0, width, height);
-
-      for (const particle of particles) {
-        if (shouldUpdate) {
-          updateChampagneParticle(particle, width, height);
-        }
-        drawChampagneParticle(context, particle);
-      }
-    };
-
-    const render = (now: number) => {
-      renderFrame(now, true);
-      animationFrame = window.requestAnimationFrame(render);
-    };
-
-    const handleResize = () => {
-      resizeCanvas();
-      if (prefersReducedMotion) {
-        renderFrame(performance.now(), false);
-      }
-    };
-
-    resizeCanvas();
-    if (prefersReducedMotion) {
-      renderFrame(performance.now(), false);
-    } else {
-      animationFrame = window.requestAnimationFrame(render);
-    }
-
-    window.addEventListener("resize", handleResize, { passive: true });
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      window.cancelAnimationFrame(animationFrame);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} className="generation-placeholder-shape__particle-canvas" aria-hidden="true" />;
 }
 
 function GenerationPlaceholderLoadingArt({ label }: { label: string }) {
@@ -230,7 +79,6 @@ function GenerationPlaceholderContent({ shape }: { shape: GenerationPlaceholderS
         </div>
       ) : (
         <>
-          <ChampagneParticleCanvas />
           <div className="generation-placeholder-shape__inner-glow" aria-hidden="true" />
           <GenerationPlaceholderLoadingArt label={t("generationCanvasMagicLoading")} />
         </>
